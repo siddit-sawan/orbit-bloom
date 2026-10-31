@@ -8,8 +8,10 @@ A celestial arena survivor for the browser, built for CrazyGames (SDK v3 integra
 - 6 stars (Sol, Nova, Luna, Vega, Sirius, Quasar), each built on its own primitive: circle, 4-point star, crescent, triangle, diamond, hexagon
 - 8 weapons that can evolve (max weapon + its paired passive), and 8 passives
 - 9 swarm types, all wayward stars: red dwarfs, stellar cinders, shooting stars, red giants, cepheids (pulsing variable stars), binary stars, pulsars that lock their beams on you, flare stars that erupt and charge, and black dwarfs that only show inside your glow. Each burns with its own corona and picks up orbiting planets as the run goes on
+- 6 late-run stars with their own attacks: white dwarfs, Wolf-Rayet stars (radial bursts), magnetars (pull you in), stellar nurseries (spawn cinders), recurrent novas (shock rings) and quasars (sweeping jets)
+- **Threat scaling:** every upgrade past your starting kit makes the swarm tougher, faster and denser (shown as THREAT on the HUD)
 - Red giants go supernova when they die, and solar flares erupt under you (and ahead of you) all run long, so standing still gets you burned
-- **Star Atlas** on the menu: every enemy and boss with its behaviour, a counter-tip and your lifetime tally
+- **Star Atlas** on the menu: every enemy and boss with its behaviour, a counter-tip and your lifetime tally. Stars stay locked until they first enter your glow
 - **Interactive tutorial** on your first run (or any time from HOW TO PLAY) that flows straight into the real run
 - 3 multi-phase bosses: The Obelisk (3:00), The Eclipse (6:00), Event Horizon (10:00). Beat Event Horizon to ascend
 - Earn shards each run and spend them in **The Forge** or on new stars

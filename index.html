@@ -111,6 +111,9 @@
   .acard .seen{display:block;font-size:9.5px;font-weight:600;letter-spacing:.16em;opacity:.65;margin-bottom:2px}
   .acard.new .seen{color:var(--cyan);opacity:.9}
   .acard.boss{grid-column:span 1;border-width:1.5px}
+  .acard.locked{background:linear-gradient(160deg,rgba(120,130,170,.08),rgba(6,8,22,.9) 55%);border-style:dashed}
+  .acard.locked b{color:rgba(255,255,255,.45);letter-spacing:.3em}
+  .acard.locked .ak,.acard.locked .seen{color:rgba(200,210,255,.55)}
 </style>
 
 </head>
@@ -138,7 +141,8 @@
 
 <div id="atlas" class="overlay">
   <h2>Star Atlas</h2>
-  <p>Every star in the swarm, and how to break it. Stars you have shattered are logged with your tally.</p>
+  <p>Every star in the swarm, and how to break it. New stars unlock the first time they enter your glow.</p>
+  <div class="stat" id="atlasCount"></div>
   <div class="agrid" id="atlasGrid"></div>
   <button class="btn" id="atlasBack">BACK</button>
 </div>
@@ -238,7 +242,7 @@ let clock=0;
 
 /* ================================================================ save data */
 const PERK0={might:0,vit:0,greed:0,kindle:0,radiance:0,flicker:0};
-let save = {coins:0,best:0,unlocked:["bloom"],perks:Object.assign({},PERK0),char:"bloom",runs:0,kills:0,tut:0,tutDone:0,seen:{}};
+let save = {coins:0,best:0,unlocked:["bloom"],perks:Object.assign({},PERK0),char:"bloom",runs:0,kills:0,tut:0,tutDone:0,seen:{},found:{}};
 function persist(){ CG.save("ob_save2", JSON.stringify(save)); }
 
 /* ================================================================ audio */
@@ -341,6 +345,12 @@ const ET={ // the swarm: dying and wayward stars (red dwarfs, cinders, shooting 
  shooter: {r:22,hp:30, sp:70, dmg:10,xp:4,c:["#ffffff","#a8c8ff","#22306a"],g:"170,190,255"},   // pulsar
  dasher:  {r:24,hp:38, sp:75, dmg:15,xp:4,c:["#fff4c0","#ffa040","#601c04"],g:"255,160,60"},    // flare star
  shade:   {r:19,hp:22, sp:128,dmg:11,xp:3,c:["#c8b8ff","#3a2a6a","#05030c"],g:"150,120,255",hidden:true}, // black dwarf
+ wdwarf:  {r:11,hp:34, sp:170,dmg:10,xp:3,c:["#ffffff","#dfe8ff","#5a6aa0"],g:"220,230,255"},   // white dwarf
+ wolf:    {r:24,hp:70, sp:62, dmg:12,xp:5,c:["#f0fff8","#5affc8","#0a4a3a"],g:"90,255,200"},    // wolf-rayet (radial bursts)
+ magnetar:{r:22,hp:80, sp:58, dmg:14,xp:6,c:["#ffffff","#c080ff","#2a0a50"],g:"190,130,255"},   // magnetar (pulls you in)
+ nursery: {r:40,hp:170,sp:34, dmg:16,xp:8,c:["#e8f0ff","#9a70ff","#1a0a3a"],g:"170,140,255"},   // stellar nursery (spawns cinders)
+ ringer:  {r:23,hp:75, sp:66, dmg:13,xp:6,c:["#fff8e0","#ff9ad0","#4a0a3a"],g:"255,150,200"},   // recurrent nova (shock rings)
+ quasar:  {r:26,hp:110,sp:52, dmg:16,xp:8,c:["#ffffff","#7ad8ff","#06203a"],g:"120,210,255"},   // quasar (sweeping jets)
  boss:    {r:84,hp:1000,sp:58,dmg:30,xp:40,c:["#ffd98a","#ff9a3a","#2a1406"],g:"255,180,80"},
  boss2:   {r:80,hp:1200,sp:66,dmg:30,xp:50,c:["#e8d8ff","#a070ff","#120828"],g:"170,110,255"},
  boss3:   {r:90,hp:1500,sp:62,dmg:34,xp:70,c:["#b8fff4","#2ad8c8","#020a10"],g:"60,230,220"}
@@ -369,7 +379,7 @@ let theme=THEMES[0], floorGrad=null, rimGrad=null, themeIdx=0;
 function setTheme(i){ themeIdx=i%THEMES.length; theme=THEMES[themeIdx]; bgGrad=floorGrad=rimGrad=null; }
 
 /* ================================================================ game state */
-let hzT=0, hz=[], P, enemies, ebul, bullets, pickups, parts, rings, texts, bolts, decals, bubs, chaks, meteors, novas, trail, wst;
+let hzT=0, hz=[], shocks=[], P, enemies, ebul, bullets, pickups, parts, rings, texts, bolts, decals, bubs, chaks, meteors, novas, trail, wst;
 let consts, time, kills, shake, spawnT, bossIdx, swarmT, bosses, motes, victory, lightR, shX, shY, revived, runCoins, pending, rerolls, flash, banner, gemCount, nextId, wantDash, bgDust, nebs, lastCard;
 const keys={}; const ptr={down:false,x:0,y:0,sx:0,sy:0,touch:false};
 let cam={x:0,y:0};
@@ -389,8 +399,10 @@ function recalc(){
   P.crit=.05+.07*(p.lucky||0)+(ch.crit||0);
   P.xpM=(1+.12*(p.growth||0)+(ch.xp||0))*(1+.1*pk.greed);
   P.regen=.3*(p.vigor||0);
-  P.drainM=1-.06*pk.kindle; P.radB=18*pk.radiance; P.dashMax=1.6*(1-.08*pk.flicker);
+  P.drainM=1-.06*pk.kindle; P.radB=18*pk.radiance; P.dashMax=1.6*(1-.08*pk.flicker); P.pw=powerOf();
 }
+function powerOf(){ let s=0; for(const id in P.weapons) s+=P.weapons[id]; for(const id in P.passives) s+=P.passives[id]; for(const id in P.evo) s+=4; return s; }
+const threat=()=>1+Math.max(0,(P.pw||0)-2)*.045; // upgrades past the starting kit make the swarm tougher and denser
 const LF=()=>clamp(P.hp/P.maxHp,0,1);          // mass fraction: drives glow radius, reach, damage and spawn pressure
 const lightTarget=()=>150+310*LF()+P.radB;
 const petalCfg=()=>{ const lv=P.weapons.petals, ev=P.evo.petals; return {n:lv+1+(ev?4:0),orbit:78+lv*5+(ev?28:0),br:12+lv+(ev?5:0),dmg:(9+3*lv)*(ev?1.8:1)}; };
@@ -401,8 +413,8 @@ function reset(){
   const ch=curChar();
   P={x:0,y:0,vx:0,vy:0,r:22,hp:1,maxHp:0,lvl:1,xp:0,need:6,inv:0,look:0,hurt:0,dx:1,dy:0,dashT:0,dashCd:0,walk:0,yaw:0,tyaw:0,weapons:{},passives:{},evo:{},rng:1,stage:0};
   wst={}; for(const w of ch.w) addWeapon(w);
-  recalc(); P.hp=P.maxHp;
-  enemies=[];ebul=[];hz=[];bullets=[];pickups=[];parts=[];rings=[];texts=[];bolts=[];decals=[];bubs=[];chaks=[];meteors=[];novas=[];trail=[];motes=[];
+  recalc(); P.hp=P.maxHp; P.pw=powerOf();
+  enemies=[];ebul=[];hz=[];shocks=[];bullets=[];pickups=[];parts=[];rings=[];texts=[];bolts=[];decals=[];bubs=[];chaks=[];meteors=[];novas=[];trail=[];motes=[];
   time=0;kills=0;shake=0;spawnT=0;bossIdx=0;swarmT=40;hzT=12;victory=false;lightR=lightTarget();shX=shY=0;bosses=0;revived=false;runCoins=0;pending=0;rerolls=2;flash=0;banner=null;gemCount=0;nextId=1;wantDash=false;
   cam={x:0,y:0}; setTheme(0);
   if(!consts){ consts=[]; for(let i=0;i<34;i++){ const a=rand(0,TAU), d=Math.sqrt(Math.random())*ARENA*.92, k={x:Math.cos(a)*d,y:Math.sin(a)*d,pts:[]};
@@ -413,10 +425,10 @@ function reset(){
 
 /* ================================================================ spawning */
 function spawnAt(type,x,y,o={}){
-  const T=ET[type], sc=1+time/65+(time/300)**2, boss=type.startsWith("boss");
-  const e={id:nextId++,t:type,x,y,vx:o.vx||0,vy:o.vy||0,r:T.r,hp:T.hp*sc*(boss?1+bosses*.5:1),max:0,sp:T.sp*(1+Math.min(time/420,.5)),dmg:T.dmg*(1+Math.min(time/400,1.2)),
+  const T=ET[type], th=threat(), boss=type.startsWith("boss"), sc=(1+time/65+(time/300)**2)*(boss?1+(th-1)*.6:th);
+  const e={id:nextId++,t:type,x,y,vx:o.vx||0,vy:o.vy||0,r:T.r,hp:T.hp*sc*(boss?1+bosses*.5:1),max:0,sp:T.sp*(1+Math.min(time/420,.5))*(1+Math.min((th-1)*.12,.2)),dmg:T.dmg*(1+Math.min(time/400,1.2)),
     xp:T.xp,flash:0,ph:rand(0,TAU),hcd:0,rot:rand(0,TAU),seed:rand(0,1000),age:0,cd:rand(1,2.2),st:0,tm:0,sh:type==="boss"?3.5:0,sum:6,phase:1,vol:3,sp3:0,dc:4,dirx:0,diry:0,elite:false,dead:false,slam:0,slT:0};
-  if(!boss&&type!=="mini"&&time>60&&Math.random()<.05+Math.min(time/4000,.1)){e.elite=true;e.hp*=3;e.r*=1.25;e.xp*=3;e.dmg*=1.3;}
+  if(!boss&&type!=="mini"&&time>60&&Math.random()<.05+Math.min(time/4000,.1)+Math.min((P.pw||0)*.002,.08)){e.elite=true;e.hp*=3;e.r*=1.25;e.xp*=3;e.dmg*=1.3;}
   e.max=e.hp; enemies.push(e); return e;
 }
 function viewR(){ return Math.hypot(W,H)/(2*Z)+70; }
@@ -435,6 +447,12 @@ function pickType(){
   if(time>60) pool.push(["shooter",3+Math.min(3,time/150)]);
   if(time>75) pool.push(["dasher",3+Math.min(3,time/150)]);
   if(time>40) pool.push(["shade",2+Math.min(4,time/90)]);
+  if(time>100) pool.push(["wdwarf",4]);
+  if(time>130) pool.push(["wolf",2+Math.min(2,time/200)]);
+  if(time>160) pool.push(["magnetar",2]);
+  if(time>200) pool.push(["nursery",1.5]);
+  if(time>240) pool.push(["ringer",2]);
+  if(time>300) pool.push(["quasar",1.5]);
   let tot=0; for(const p of pool) tot+=p[1]; let r=Math.random()*tot;
   for(const p of pool){ r-=p[1]; if(r<=0) return p[0]; } return "slime";
 }
@@ -646,13 +664,13 @@ function update(dt){
   // spawning
   spawnT-=dt;
   if(spawnT<=0&&!tut){
-    spawnT=Math.max(.08,.55-time/130)/(.75+.6*LF()); // a brighter glow draws more of the dark
-    const n=1+Math.floor(time/30);
-    for(let i=0;i<n&&enemies.length<300;i++) spawn(pickType());
+    spawnT=Math.max(.07,.55-time/130)/(.75+.6*LF())/(1+(threat()-1)*.6); // a brighter glow draws more of the dark
+    const n=1+Math.floor(time/30)+Math.floor((P.pw||0)/10);
+    for(let i=0;i<n&&enemies.length<360;i++) spawn(pickType());
   }
   if(!tut&&bossIdx<BOSS_AT.length&&time>=BOSS_AT[bossIdx]){ spawn(BOSS_T[bossIdx],rand(0,TAU)); rings.push({x:P.x,y:P.y,r:10,m:900,l:1,c:"255,210,90"}); sfx.boss(); shake=14; banner={txt:BOSS_N[bossIdx].toUpperCase(),sub:"emerges from the void",t:2.8}; bossIdx++; }
   if(!tut) swarmT-=dt;
-  if(swarmT<=0){ swarmT=50; const t=pick1(["slime","bat","spiky","mini"]), n=26+Math.min(14,Math.floor(time/40));
+  if(swarmT<=0){ swarmT=50; const t=pick1(time>100?["slime","bat","spiky","mini","wdwarf"]:["slime","bat","spiky","mini"]), n=26+Math.min(20,Math.floor(time/30)+Math.floor((P.pw||0)/6));
     for(let i=0;i<n;i++) spawn(t,i*TAU/n); banner={txt:"SWARM!",sub:"Break the circle",t:2.2}; sfx.boss(); }
 
   // enemies
@@ -667,6 +685,17 @@ function update(dt){
       if(d<230){tx=-tx;ty=-ty;} else if(d<340){const px=-ty,py=tx;tx=px;ty=py;sp*=.6;}
       e.cd-=dt; if(e.cd<=0&&d<560){e.cd=2.3; const a=Math.atan2(dy,dx); shootAt(e,290,e.dmg,a); if(time>180){ shootAt(e,290,e.dmg,a-.28); shootAt(e,290,e.dmg,a+.28); } }
     }
+    else if(e.t==="wdwarf"){ const s=Math.sin(e.age*4+e.seed)*.7; tx+=-dy/d*s; ty+=dx/d*s; } // dense and quick, jinking side to side
+    else if(e.t==="wolf"){ e.cd-=dt; if(e.cd<=0&&d<620){ e.cd=3.2; const o=rand(0,TAU); for(let i=0;i<10;i++) shootAt(e,175,e.dmg*.6,o+i*TAU/10); } }
+    else if(e.t==="magnetar"){ if(d<300) sp*=.3; if(d<460&&P.dashT<=0){ const f=110*(1-d/460); P.x-=dx/d*f*dt; P.y-=dy/d*f*dt; } } // drags you toward it; dashing breaks free
+    else if(e.t==="nursery"){ e.sum-=dt; if(e.sum<=0){ e.sum=5; if(enemies.length<340) for(let i=0;i<3;i++){ const a=rand(0,TAU); spawnAt("mini",e.x+Math.cos(a)*(e.r+16),e.y+Math.sin(a)*(e.r+16),{vx:Math.cos(a)*200,vy:Math.sin(a)*200}); } } }
+    else if(e.t==="ringer"){ if(d<280) sp*=.15; e.cd-=dt; if(e.cd<=0&&d<520){ e.cd=3.4; shocks.push({x:e.x,y:e.y,r:e.r,max:360,d:e.dmg,hit:false}); sfx.nova(); } }
+    else if(e.t==="quasar"){ // keeps its distance, then sweeps twin jets across you: 0 idle, 1 warning, 2 firing
+      if(d<300){tx=-tx;ty=-ty;} else if(d<440){const px=-ty,py=tx;tx=px;ty=py;sp*=.5;}
+      e.tm-=dt; if(e.tm<=0){ e.st=(e.st+1)%3; e.tm=[2.2,.9,2.4][e.st]; if(e.st===1) e.ja=Math.atan2(dy,dx)-.9; }
+      if(e.st>0){ sp*=.3; e.ja+=dt*.75; }
+      if(e.st===2&&P.inv<=0) for(const o of[0,Math.PI]){ const ca=Math.cos(e.ja+o), sa=Math.sin(e.ja+o), t=dx*ca+dy*sa;
+        if(t>0&&t<560&&Math.abs(-dx*sa+dy*ca)<16+P.r){ hurtPlayer(e.dmg,e.x,e.y); break; } } }
     else if(e.t==="dasher"||e.t==="boss2"){
       const wind=e.t==="boss2"?.9:.7, dur=e.t==="boss2"?.6:.45, dsp=e.t==="boss2"?560:620, cdr=e.t==="boss2"?4.5:2.2, rng=e.t==="boss2"?9999:380;
       if(e.st===0){ e.dc-=dt; if(e.dc<=0&&d<rng){e.st=1;e.tm=wind;e.dirx=dx/d;e.diry=dy/d;} }
@@ -717,6 +746,8 @@ function update(dt){
     if(h.t<=0&&!h.done){ h.done=true; if(tut) tut.flares++; sfx.boom(); shake=Math.max(shake,8); rings.push({x:h.x,y:h.y,r:10,m:h.r*1.15,l:1,c:"255,140,60"}); burst(h.x,h.y,22,"#ffb04a",320,.55,5);
       if(Math.hypot(P.x-h.x,P.y-h.y)<h.r+P.r*.5){ hurtPlayer(h.d,h.x,h.y); if(state!=="play") return; } } }
   hz=hz.filter(h=>!h.done);
+  for(const sh of shocks){ sh.r+=230*dt; if(!sh.hit&&Math.abs(Math.hypot(P.x-sh.x,P.y-sh.y)-sh.r)<12+P.r){ sh.hit=true; hurtPlayer(sh.d,sh.x,sh.y); if(state!=="play") return; } }
+  shocks=shocks.filter(sh=>sh.r<sh.max);
 
   updateWeapons(dt);
   enemies=enemies.filter(e=>!e.dead);
@@ -812,6 +843,7 @@ function choose(u){
   else if(u.kind==="evo"){ P.evo[u.id]=true; banner={txt:EVOS[u.id].name.toUpperCase(),sub:"Weapon evolved!",t:2.4}; flash=.6; burst(P.x,P.y,40,"#ffe27a",360,.8,6); }
   else if(u.kind==="p"){ P.passives[u.id]=(P.passives[u.id]||0)+1; recalc(); if(u.id==="vigor") P.hp=Math.min(P.maxHp,P.hp+25); }
   else { P.hp=Math.min(P.maxHp,P.hp+P.maxHp*.5); runCoins+=50; }
+  P.pw=powerOf();
   $("levelup").classList.remove("show"); state="play"; CG.start();
   if(pending>0) openLevel();
 }
@@ -859,6 +891,12 @@ const ATLAS={
   slime:   {n:"Red Dwarf",k:"Common",d:"Small, cool and endlessly numerous. They drift toward your light in loose crowds.",tip:"Orbiting Moons and Corona shred them in bulk."},
   spiky:   {n:"Shooting Star",k:"Fast",d:"Streaks straight at you, trailing stardust. Faster than you are.",tip:"Sidestep it instead of trying to outrun it."},
   tank:    {n:"Red Giant",k:"Heavy · Supernova",d:"A swollen, dying star with huge mass. When it falls it goes supernova.",tip:"After the kill, get out of the red blast ring."},
+  wdwarf:  {n:"White Dwarf",k:"Dense · Fast",d:"The tiny, white-hot core a dead star leaves behind. Small, heavy and very quick, jinking side to side.",tip:"Let it come to you. Orbiting weapons catch it as it darts in."},
+  wolf:    {n:"Wolf-Rayet Star",k:"Radial bursts",d:"A star blowing itself apart in a fierce stellar wind. Every few seconds it fires a ring of ten bolts.",tip:"It glows green before a burst. Slip through a gap or dash through it."},
+  magnetar:{n:"Magnetar",k:"Gravity well",d:"A neutron star with a crushing magnetic field. Get close and it drags you toward it.",tip:"Dashing breaks its pull. Never fight one with your back to a crowd."},
+  nursery: {n:"Stellar Nursery",k:"Spawner",d:"A drifting cloud of gas where new stars are born. It keeps flinging out stellar cinders.",tip:"Kill it early, or it buries you in cinders."},
+  ringer:  {n:"Recurrent Nova",k:"Shock rings",d:"A star that erupts again and again. Each eruption sends out an expanding shock ring.",tip:"It glows pink before erupting. Dash through the ring or stay out of reach."},
+  quasar:  {n:"Quasar",k:"Sweeping jets",d:"A feeding black hole that keeps its distance and sweeps twin jets of plasma across the arena.",tip:"A dashed line warns you. Move off the line, or dash through the beam."},
   bat:     {n:"Cepheid",k:"Variable star",d:"Throbs with light and weaves from side to side as it closes in, so it's hard to pin down.",tip:"Area weapons like Pulsar Wave and Corona catch the weave."},
   shade:   {n:"Black Dwarf",k:"Hidden",d:"A burnt-out star that gives off no light. It only shows inside your glow.",tip:"Keep your mass high. A bigger glow reveals them sooner."},
   splitter:{n:"Binary Star",k:"Splits",d:"A gold sun and a blue one locked in orbit, one feeding on the other. Breaks into two cinders.",tip:"Kill it away from crowds so the cinders don't pile on."},
@@ -871,16 +909,17 @@ const ATLAS={
 };
 const atlasCards=[];
 function renderAtlas(){
-  const box=$("atlasGrid"); box.innerHTML=""; atlasCards.length=0; const dpr=Math.min(2,window.devicePixelRatio||1);
-  Object.keys(ATLAS).forEach((t,i)=>{
-    const A=ATLAS[t], T=ET[t], n=save.seen[t]||0, boss=t.startsWith("boss"), d=document.createElement("div");
-    d.className="acard"+(boss?" boss":"")+(n?"":" new"); d.style.setProperty("--ag",T.g);
+  const box=$("atlasGrid"); box.innerHTML=""; atlasCards.length=0; const dpr=Math.min(2,window.devicePixelRatio||1), keys=Object.keys(ATLAS);
+  $("atlasCount").textContent=`${keys.filter(t=>save.found[t]).length} / ${keys.length} DISCOVERED`;
+  keys.forEach((t,i)=>{
+    const A=ATLAS[t], T=ET[t], n=save.seen[t]||0, boss=t.startsWith("boss"), found=!!save.found[t], d=document.createElement("div");
+    d.className="acard"+(boss?" boss":"")+(found?"":" locked"); d.style.setProperty("--ag",found?T.g:"120,130,170");
     const cvs=document.createElement("canvas"); cvs.width=cvs.height=112*dpr; d.appendChild(cvs);
-    const hp=T.hp, sp=T.sp, dm=T.dmg;
-    d.insertAdjacentHTML("beforeend",`<div><span class="seen">${n?"✦ "+n+" SHATTERED":"UNCHARTED"}</span><b>${A.n}</b><span class="ak">${A.k}</span><p>${A.d}</p><div class="tip">➜ ${A.tip}</div>
-      <div class="chips"><span>MASS ${hp}</span><span>SPEED ${sp}</span><span>IMPACT ${dm}</span></div></div>`);
+    d.insertAdjacentHTML("beforeend",found?`<div><span class="seen">${n?"✦ "+n+" SHATTERED":"SIGHTED"}</span><b>${A.n}</b><span class="ak">${A.k}</span><p>${A.d}</p><div class="tip">➜ ${A.tip}</div>
+      <div class="chips"><span>MASS ${T.hp}</span><span>SPEED ${T.sp}</span><span>IMPACT ${T.dmg}</span></div></div>`
+      :`<div><span class="seen">🔒 LOCKED</span><b>???</b><span class="ak">${boss?"Boss":"Undiscovered"}</span><p>Not yet sighted. It is logged here the first time it enters your glow.</p></div>`);
     box.appendChild(d);
-    atlasCards.push({g:cvs.getContext("2d"),dpr,e:{t,id:i,x:0,y:0,vx:1,vy:0,r:T.r,seed:i*97,ph:0,rot:0,flash:0,elite:false,portrait:true,cd:2,st:0,tm:0,dirx:1,diry:0,phase:boss?2:1,slam:0,slT:0,hp:1,max:1}});
+    atlasCards.push({found,g:cvs.getContext("2d"),dpr,e:{t,id:i,x:0,y:0,vx:1,vy:0,r:T.r,seed:i*97,ph:0,rot:0,flash:0,elite:false,portrait:true,cd:2,st:0,tm:0,dirx:1,diry:0,phase:boss?2:1,slam:0,slT:0,hp:1,max:1}});
   });
 }
 function drawAtlas(){
@@ -889,7 +928,9 @@ function drawAtlas(){
     e.ph=clock*6; e.rot=clock*.6; e.cd=2.3-((clock*.9+e.id*.3)%2.3); e.vx=Math.cos(clock*.5)-.3; e.vy=-Math.sin(clock*.5);
     if(e.t==="dasher"){ const k=(clock+e.id)%3; e.st=k<2?0:2; }
     C=c.g; C.setTransform(1,0,0,1,0,0); C.clearRect(0,0,sz,sz); C.setTransform(sc,0,0,sc,sz/2,sz/2);
-    drawEnemy(e); }
+    drawEnemy(e);
+    if(!c.found){ C.setTransform(1,0,0,1,0,0); C.globalCompositeOperation="source-atop"; C.fillStyle="#3a4070"; C.fillRect(0,0,sz,sz); // silhouette only
+      C.globalCompositeOperation="source-over"; C.fillStyle="rgba(200,210,255,.75)"; C.font=`600 ${30*c.dpr}px 'Exo 2'`; C.textAlign="center"; C.textBaseline="middle"; C.fillText("?",sz/2,sz/2); } }
   C=ctx; P.x=px; P.y=py; SK=gameSK;
 }
 $("toAtlas").onclick=()=>{ hideAll(); state="atlas"; renderAtlas(); $("atlas").classList.add("show"); };
@@ -937,7 +978,7 @@ $("revive").onclick=async()=>{
   const ok=await CG.ad("rewarded");
   if(ok){ revived=true; save.coins-=lastResult.coins; persist(); lastResult=null; P.hp=P.maxHp*.75; P.inv=2.5;
     for(const e of enemies) if(Math.hypot(e.x-P.x,e.y-P.y)<360&&!e.t.startsWith("boss")) e.dead=true;
-    enemies=enemies.filter(e=>!e.dead); ebul=[]; hz=[]; rings.push({x:P.x,y:P.y,r:10,m:360,l:1,c:"120,240,255"}); state="play"; CG.start(); }
+    enemies=enemies.filter(e=>!e.dead); ebul=[]; hz=[]; shocks=[]; rings.push({x:P.x,y:P.y,r:10,m:360,l:1,c:"120,240,255"}); state="play"; CG.start(); }
   else { state="over"; $("over").classList.add("show"); $("revive").style.display="none"; }
 };
 $("double").onclick=async()=>{
@@ -1248,7 +1289,40 @@ const SP={
     const g=C.createRadialGradient(-2,-2,.5,0,0,r); g.addColorStop(0,c[0]); g.addColorStop(.6,c[1]); g.addColorStop(1,c[2]); dot(0,0,r,g);
     C.save(); C.beginPath(); C.arc(0,0,r,0,TAU); C.clip(); C.fillStyle=hexA(c[0],.3); C.fillRect(-r,-1.4,r*2,1.3); C.fillRect(-r,1.6,r*2,.8); C.restore();
     if(i===1){ C.save(); C.rotate(-.4); C.scale(1,.3); C.beginPath(); C.arc(0,0,r*1.5,0,Math.PI); C.strokeStyle=hexA(c[0],.85); C.lineWidth=1.6; C.stroke(); C.restore(); } }),
-  pin:()=>sprite("pin",2,()=>{ pHaze(2,"#ffffff",1); })
+  pin:()=>sprite("pin",2,()=>{ pHaze(2,"#ffffff",1); }),
+  wd:()=>sprite("wd",ET.wdwarf.r*2.6,()=>{ const r=ET.wdwarf.r, c=ET.wdwarf.c;
+    pHaze(r*2.4,"#cfe0ff",.55);
+    for(const [R,w,rot,al] of[[r*2.6,.22,0,1],[r*1.6,.2,Math.PI/4,.55]]){ starP(0,0,R,r*w,4,rot);
+      const g=C.createRadialGradient(0,0,0,0,0,R); g.addColorStop(0,`rgba(255,255,255,${al})`); g.addColorStop(.4,`rgba(200,220,255,${al*.6})`); g.addColorStop(1,"rgba(200,220,255,0)"); C.fillStyle=g; C.fill(); }
+    ringL(0,0,r*1.45,"rgba(220,230,255,.35)",1); pSphere(r,c,17,4); pHaze(r*.6,"#ffffff",1); }),
+  wolf:(i)=>sprite("wo"+i,ET.wolf.r*2.2,()=>{ const r=ET.wolf.r, c=ET.wolf.c, t=i/NF;
+    for(let k=0;k<3;k++){ const f=(t+k/3)%1; ringL(0,0,r*(1.05+f*1.1),hexA(c[1],.5*(1-f)),.6+2*(1-f)); } // stellar-wind shells
+    for(let j=0;j<16;j++){ const a=j*TAU/16+hsh(4,j)*.3, f=(t+hsh(5,j))%1, r0=r*(1.05+f*.9); seg(Math.cos(a)*r0,Math.sin(a)*r0,Math.cos(a)*(r0+r*.3),Math.sin(a)*(r0+r*.3),hexA(c[0],.7*(1-f)),1.4); }
+    pCorona(r,10,c[1],.3,t,41); pSphere(r,c,41,20); }),
+  mag:()=>sprite("mg",ET.magnetar.r*2,()=>{ const r=ET.magnetar.r, c=ET.magnetar.c;
+    pHaze(r*1.9,c[1],.4);
+    for(let j=0;j<4;j++){ C.save(); C.rotate(j*Math.PI/4); for(const sd of[-1,1]){ C.strokeStyle=hexA(c[1],.55); C.lineWidth=1.3; C.beginPath(); C.ellipse(0,sd*r*.75,r*.5,r*.75,0,0,TAU); C.stroke(); } C.restore(); } // twisted field
+    C.strokeStyle="rgba(255,255,255,.8)"; C.lineWidth=1; C.lineJoin="round"; C.beginPath();
+    for(let j=0;j<6;j++){ const a=hsh(2,j)*TAU; C.moveTo(Math.cos(a)*r*.5,Math.sin(a)*r*.5); C.lineTo(Math.cos(a+.25)*r*1.1,Math.sin(a+.25)*r*1.1); C.lineTo(Math.cos(a+.05)*r*1.5,Math.sin(a+.05)*r*1.5); } C.stroke(); // field crackle
+    pSphere(r*.5,c,8,6); pHaze(r*.55,"#ffffff",.9); }),
+  ring:(i)=>sprite("rn"+i,ET.ringer.r*2.4,()=>{ const r=ET.ringer.r, c=ET.ringer.c, t=i/NF;
+    pHaze(r*2.2,c[1],.35);
+    for(let k=0;k<2;k++){ const f=(t+k*.5)%1; C.save(); C.scale(1,.85); ringL(0,0,r*(1.1+f*1.2),hexA(c[1],.7*(1-f)),.6+2.4*(1-f)); C.restore(); } // ejected shells
+    starP(0,0,r*1.7,r*.25,8,t*TAU/8); C.fillStyle=hexA(c[0],.35); C.fill();
+    pCorona(r*.8,8,c[1],.35,t,29); pSphere(r*.8,c,29,10); }),
+  quasar:()=>sprite("qs",ET.quasar.r*2.2,()=>{ const r=ET.quasar.r, c=ET.quasar.c;
+    pHaze(r*2.1,c[1],.35);
+    C.save(); C.scale(1,.38);
+    for(let k=0;k<5;k++){ const R=r*(1.9-k*.2), g=C.createRadialGradient(0,0,R*.5,0,0,R); g.addColorStop(0,"rgba(255,255,255,0)"); g.addColorStop(.7,hexA(k%2?"#ffd98a":c[1],.5)); g.addColorStop(1,hexA(c[1],0)); C.fillStyle=g; C.beginPath(); C.arc(0,0,R,0,TAU); C.fill(); }
+    ringL(0,0,r*1.5,"rgba(255,230,180,.6)",1.4,[6,5]); C.restore(); // accretion disk
+    dot(0,0,r*.45,"#020610"); ringL(0,0,r*.47,"rgba(255,255,255,.9)",1.6); pHaze(r*.9,"#bfe9ff",.6); }),
+  nurse:(i)=>sprite("nu"+i,ET.nursery.r*1.9,()=>{ const r=ET.nursery.r, c=ET.nursery.c, t=i/6;
+    for(let j=0;j<14;j++){ const a=hsh(6,j)*TAU, d=Math.sqrt(hsh(7,j))*r*.9, R=r*(.45+.45*hsh(8,j)), x=Math.cos(a)*d, y=Math.sin(a)*d, col=j%3?c[1]:"#5ad8e0";
+      const g=C.createRadialGradient(x,y,0,x,y,R); g.addColorStop(0,hexA(col,.5)); g.addColorStop(1,hexA(col,0)); C.fillStyle=g; C.fillRect(x-R,y-R,R*2,R*2); } // glowing gas
+    C.strokeStyle="rgba(10,4,24,.3)"; C.lineCap="round";
+    for(let j=0;j<3;j++){ C.lineWidth=r*(.12+.08*hsh(9,j)); const a=hsh(10,j)*TAU; C.beginPath(); C.moveTo(Math.cos(a)*r,Math.sin(a)*r); C.quadraticCurveTo(hsh(11,j)*r*.6-r*.3,hsh(12,j)*r*.6-r*.3,Math.cos(a+2.4)*r*.9,Math.sin(a+2.4)*r*.9); C.stroke(); } // dust lanes
+    for(let j=0;j<6;j++){ const a=hsh(13,j)*TAU, d=hsh(14,j)*r*.75, tw=.6+.4*Math.sin(t*TAU+j*1.9); // newborn stars
+      C.save(); C.translate(Math.cos(a)*d,Math.sin(a)*d); pHaze(r*.25*tw,"#ffffff",.9); sparkle(0,0,r*.22*tw,"#fff",0); C.restore(); } })
 };
 function warmSprites(){ // paint everything up front (during the loading screen) so the first swarm doesn't hitch
   SK=Math.min(2,Math.max(1,Math.ceil(DPR*Z*4)/4));
@@ -1256,8 +1330,13 @@ function warmSprites(){ // paint everything up front (during the loading screen)
   for(let i=0;i<12;i++) SP.ceph(i);
   for(let i=0;i<6;i++){ SP.bin(0,i); SP.bin(1,i); }
   SP.cinder(); SP.shoot(); SP.tail("ice"); SP.tail("fire"); SP.pulsar(); SP.beam(false); SP.beam(true); SP.dead(); SP.pin(); for(let i=0;i<3;i++) SP.planet(i);
+  SP.wd(); SP.mag(); SP.quasar(); for(let i=0;i<NF;i++){ SP.wolf(i); SP.ring(i); } for(let i=0;i<6;i++) SP.nurse(i);
 }
 /* one additive pass for elite halos, instead of a composite switch per star */
+function discover(t){ // first sighting unlocks the star's Star Atlas entry
+  save.found[t]=1; persist();
+  if(!banner||banner.t<1) banner={txt:"NEW STAR LOGGED",sub:ATLAS[t].n+" added to the Star Atlas",t:2.2};
+}
 function drawSwarmGlow(){
   C.globalCompositeOperation="lighter";
   for(const e of enemies){ if(e.dead||!e.elite) continue; const T=ET[e.t]; if(T.hidden||e.r>PAD||!vis(e.x,e.y,e.r*2.5)) continue; // regular stars carry their halo in the sprite
@@ -1272,6 +1351,7 @@ function drawEnemy(e){
   if(!boss&&dd>lightR+r*2+30) return; // swallowed by the dark (its pinprick is drawn in the glow pass)
   let fade=1;
   if(T.hidden&&!pt){ fade=clamp((lightR*.92-dd)/70,0,1); if(fade<=0) return; } // black dwarfs only exist inside your glow
+  if(!pt&&state==="play"&&!save.found[e.t]&&dd<lightR) discover(e.t);
   if(boss) glow(e.x,e.y,r*2.2,`rgba(${T.g},.5)`,.4);
   else if(pt) glow(e.x,e.y,r*2.4,`rgba(${T.g},.5)`,.5);
   if(e.elite){ ringL(e.x,e.y,r*1.5,`rgba(255,217,138,${.5+.3*Math.sin(clock*8)})`,1.5,[3,4]); }
@@ -1309,6 +1389,18 @@ function drawEnemy(e){
       if(heat>0) glow(x,y,r*2.8,"rgba(255,170,60,.9)",heat*.85);
       stampF(SP.flare(0,f),x,y,0,k,fl); if(heat>0) stamp(SP.flare(1,f),x,y,0,k,heat); break; }
     case"shade": stampF(SP.dead(),x,y,e.rot*.3,k,fl); body=false; break; // black dwarf
+    case"wdwarf": stampF(SP.wd(),x,y,e.rot*.4,k,fl); break;
+    case"wolf": { const ch=clamp(1-e.cd/3.2,0,1); if(ch>.6) glow(x,y,r*2.6,"rgba(90,255,200,.9)",(ch-.6)*2.2); stampF(SP.wolf(fr(.6,NF)),x,y,0,k,fl); break; }
+    case"magnetar": if(!pt&&dd<460){ const f=(clock*.9+e.seed*.01)%1; ringL(x,y,460*(1-f)+r,`rgba(190,130,255,${.3*f})`,2); } // pull waves converge inward
+      stampF(SP.mag(),x,y,e.rot*1.5,k,fl); break;
+    case"ringer": if(e.cd<.8) glow(x,y,r*2.6,"rgba(255,150,200,.9)",1-e.cd/.8); stampF(SP.ring(fr(.5,NF)),x,y,0,k,fl); break;
+    case"nursery": stampF(SP.nurse(fr(.25,6)),x,y,e.rot*.15,k,fl); break;
+    case"quasar": if(e.st>0&&!pt){ C.lineCap="round";
+        for(const o of[0,Math.PI]){ const ex=x+Math.cos(e.ja+o)*560, ey=y+Math.sin(e.ja+o)*560;
+          if(e.st===1){ C.setLineDash([10,8]); seg(x,y,ex,ey,`rgba(120,210,255,${.35+.3*Math.sin(clock*25)})`,3); C.setLineDash([]); }
+          else { seg(x,y,ex,ey,"rgba(120,210,255,.3)",30); seg(x,y,ex,ey,"rgba(200,240,255,.75)",12); seg(x,y,ex,ey,"#fff",4); } }
+        if(e.st===2) glow(x,y,r*3,"rgba(150,220,255,.9)",.9); }
+      stampF(SP.quasar(),x,y,e.rot*.25,k,fl); break;
     case"boss": dObelisk(e,r,T,edge); body=false; break;
     case"boss2": dEclipse(e,r,T,edge); body=false; break;
     case"boss3": dHorizon(e,r,T,edge); body=false; break;
@@ -1414,7 +1506,8 @@ function drawHUD(){
   C.textAlign="left"; C.fillStyle=low?"#ffb08a":"#fff6d8"; C.font="bold 12px 'Exo 2'"; C.fillText(`MASS ${Math.ceil(P.hp)} / ${P.maxHp}${low?"  — COLLAPSING!":""}`,bx+4,by+31);
   const rowY=by+56, fmt=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,"0")}`;
   C.fillStyle="#fff"; C.font="bold 17px 'Exo 2'";
-  C.fillText(`⏱ ${fmt(time)}   ✿ ${kills}   ◆ ${runCoins}${bossIdx<BOSS_AT.length?"   ☠ "+fmt(BOSS_AT[bossIdx]-time):""}`,120,rowY);
+  const row=`⏱ ${fmt(time)}   ✿ ${kills}   ◆ ${runCoins}${bossIdx<BOSS_AT.length?"   ☠ "+fmt(BOSS_AT[bossIdx]-time):""}`; C.fillText(row,120,rowY);
+  { const th=threat(); if(th>1.05){ const tx=120+C.measureText(row).width+18; C.fillStyle=th>2?"#ff8a6a":"#ffd25f"; C.fillText(`⚠ THREAT ×${th.toFixed(1)}`,tx,rowY); } } // the swarm grows with your power
   // weapon / passive slots
   let sx=24;
   const slot=(def,lv,y)=>{ C.fillStyle="rgba(20,10,60,.7)"; C.beginPath(); C.arc(sx,y,15,0,TAU); C.fill(); C.strokeStyle=def.col; C.lineWidth=3; C.beginPath(); C.arc(sx,y,15,0,TAU); C.stroke();
@@ -1468,6 +1561,8 @@ function drawDarkness(sx,sy){
   for(const g of pickups) hole(g.x,g.y,g.k==="gem"?30:g.k==="chest"||g.k==="bomb"?110:50,g.k==="gem"?.35:g.k==="bomb"?.9:.6);
   for(const b of ebul) hole(b.x,b.y,42,.45);
   for(const h of hz) hole(h.x,h.y,h.r*1.1,.75);
+  for(const sh of shocks) for(let i=0;i<12;i++){ const a=i*TAU/12; hole(sh.x+Math.cos(a)*sh.r,sh.y+Math.sin(a)*sh.r,70,.55); } // dangers must stay visible in the dark
+  for(const e of enemies) if(e.t==="quasar"&&e.st>0) for(const o of[0,Math.PI]) for(let i=1;i<=8;i++){ const L=i*68; hole(e.x+Math.cos(e.ja+o)*L,e.y+Math.sin(e.ja+o)*L,60,e.st===2?.6:.35); }
   for(const m of motes) hole(m.x,m.y,34,.6);
   for(const e of enemies) if(e.t.startsWith("boss")) hole(e.x,e.y,e.r*2.4,.5);
   ctx.drawImage(darkCv,0,0,W,H);
@@ -1501,6 +1596,7 @@ function render(){
     ringL(h.x,h.y,h.r,`rgba(${col},${bl})`,3.2,[12,7]); ringL(h.x,h.y,h.r*f,`rgba(255,235,190,${.4+.5*f})`,1.6);
     for(let i=0;i<4;i++){ const a=clock*1.5+i*TAU/4; sparkle(h.x+Math.cos(a)*h.r,h.y+Math.sin(a)*h.r,7,`rgba(255,220,160,${bl})`,a); }
     sparkle(h.x,h.y,14+f*12,`rgba(255,235,190,${.5+.5*f})`,clock*2); }
+  for(const sh of shocks){ const a=1-sh.r/sh.max; ringL(sh.x,sh.y,sh.r,`rgba(255,150,200,${.12+.3*a})`,16); ringL(sh.x,sh.y,sh.r,`rgba(255,240,250,${.3+.6*a})`,2.5); }
   drawSwarmGlow();
   for(const e of enemies) drawEnemy(e);
   if(state!=="over") drawPlayer();
@@ -1555,11 +1651,11 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden) pause(); 
   CG.loadingStart();
   try{ await Promise.all([document.fonts.load('bold 17px "Exo 2"')]); }catch(e){}
   await CG.init();
-  try{ const raw=await CG.load("ob_save2"); if(raw){ const s=JSON.parse(raw); save=Object.assign(save,s); save.perks=Object.assign({},PERK0,s.perks); save.seen=Object.assign({},s.seen); if(!s.tutDone&&(s.runs||0)>0) save.tutDone=1; if(!save.unlocked.includes("bloom")) save.unlocked.push("bloom"); } }catch(e){}
+  try{ const raw=await CG.load("ob_save2"); if(raw){ const s=JSON.parse(raw); save=Object.assign(save,s); save.perks=Object.assign({},PERK0,s.perks); save.seen=Object.assign({},s.seen); save.found=Object.assign({},s.found); for(const t in save.seen) save.found[t]=1; if(!s.tutDone&&(s.runs||0)>0) save.tutDone=1; if(!save.unlocked.includes("bloom")) save.unlocked.push("bloom"); } }catch(e){}
   reset(); P.weapons={}; refreshMenu(); applyMute(); warmSprites();
   CG.loadingStop();
   requestAnimationFrame(frame);
-  if(window.__OB_TEST) window.__OB={startRun,get state(){return state;},get P(){return P;},get save(){return save;},pickFirst(){const c=$("cards").children[0];c&&c._u&&choose(c._u);},setChar(id){save.char=id;},god(){P.hp=P.maxHp=1000;},kills:()=>kills,time:()=>time,renderSelect,drawPortraits,addXp,die:()=>{P.hp=0;die();},dash:()=>{wantDash=true;},giveAll(){for(const id in WEAPONS){P.weapons[id]=5;wst[id]=wst[id]||{t:0,ang:0,tick:0};}recalc();},skipTime(t){time+=t;swarmT=0;},enemies:()=>enemies,setBossIdx(i){bossIdx=i;},spawnAt,swarm(n){const ts=Object.keys(ET).filter(t=>!t.startsWith("boss"));for(let i=0;i<n;i++){const a=Math.random()*TAU,d=120+Math.random()*420;spawnAt(ts[i%ts.length],P.x+Math.cos(a)*d,P.y+Math.sin(a)*d);}},get ft(){return frameMs;},get tut(){return tut;},tutNext,warmSprites,spriteCount:()=>Object.keys(SPR).length,showAtlas:()=>$("toAtlas").onclick(),set time(v){time=v;}};
+  if(window.__OB_TEST) window.__OB={startRun,get state(){return state;},get P(){return P;},get save(){return save;},pickFirst(){const c=$("cards").children[0];c&&c._u&&choose(c._u);},setChar(id){save.char=id;},god(){P.hp=P.maxHp=1000;},kills:()=>kills,time:()=>time,renderSelect,drawPortraits,addXp,die:()=>{P.hp=0;die();},dash:()=>{wantDash=true;},giveAll(){for(const id in WEAPONS){P.weapons[id]=5;wst[id]=wst[id]||{t:0,ang:0,tick:0};}recalc();},skipTime(t){time+=t;swarmT=0;},enemies:()=>enemies,setBossIdx(i){bossIdx=i;},spawnAt,swarm(n){const ts=Object.keys(ET).filter(t=>!t.startsWith("boss"));for(let i=0;i<n;i++){const a=Math.random()*TAU,d=120+Math.random()*420;spawnAt(ts[i%ts.length],P.x+Math.cos(a)*d,P.y+Math.sin(a)*d);}},get ft(){return frameMs;},threat,get tut(){return tut;},tutNext,warmSprites,spriteCount:()=>Object.keys(SPR).length,showAtlas:()=>$("toAtlas").onclick(),set time(v){time=v;}};
 })();
 })();
 </script>
