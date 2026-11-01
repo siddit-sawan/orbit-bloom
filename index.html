@@ -95,6 +95,8 @@
   #tut .tbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--gold));transition:width .3s}
   #tutSkip{background:none;border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:99px;padding:3px 12px;font:600 11px var(--disp);letter-spacing:.12em;cursor:pointer;opacity:.75}
   #tutSkip:hover{opacity:1;border-color:var(--gold)}
+  #introSkip{position:fixed;right:20px;bottom:20px;z-index:7;display:none;background:rgba(10,8,30,.5);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:99px;padding:8px 18px;font:600 13px var(--disp);letter-spacing:.14em;cursor:pointer;opacity:.8}
+  #introSkip:hover{opacity:1;border-color:var(--gold)}
 
   /* ---- star atlas (enemy dictionary) ---- */
   #atlas{justify-content:flex-start;padding:28px 14px;background:radial-gradient(circle at 50% 30%,rgba(30,36,96,.92),rgba(3,4,12,.98) 70%)}
@@ -126,7 +128,7 @@
   <div class="logo"><i class="orbit o1"></i><i class="orbit o2"></i><h1><span>STAR</span><span>VEIL</span></h1></div>
   <p>You are a newborn star. Your <b style="color:var(--gold)">mass</b> is your life &mdash; it burns away every second, and only the swarm you shatter can feed it. Grow from a single spark into a galaxy.</p>
   <div class="bar"><button class="btn" id="play">PLAY</button><button class="btn dim" id="toChars">STARS &amp; FORGE</button></div>
-  <div class="bar"><button class="btn alt" id="howTo">HOW TO PLAY</button><button class="btn alt" id="toAtlas">STAR ATLAS</button></div>
+  <div class="bar"><button class="btn alt" id="howTo">HOW TO PLAY</button><button class="btn alt" id="toAtlas">STAR ATLAS</button><button class="btn alt" id="toIntro">INTRO</button></div>
   <div class="stat" id="menuStats"></div>
   <div class="hint">WASD / Arrows / hold mouse / drag to move &bull; SPACE, SHIFT or right-click to dash &bull; weapons fire automatically &bull; P pause &bull; M mute</div>
 </div>
@@ -147,6 +149,7 @@
   <button class="btn" id="atlasBack">BACK</button>
 </div>
 
+<button id="introSkip">SKIP ▸</button>
 <div id="tut"><div class="tstep"><span id="tutStep">TUTORIAL</span><button id="tutSkip">SKIP ▸</button></div><div class="ttxt" id="tutTxt"></div><div class="tbar"><i id="tutProg"></i></div></div>
 
 <div id="levelup" class="overlay">
@@ -242,7 +245,7 @@ let clock=0;
 
 /* ================================================================ save data */
 const PERK0={might:0,vit:0,greed:0,kindle:0,radiance:0,flicker:0};
-let save = {coins:0,best:0,unlocked:["bloom"],perks:Object.assign({},PERK0),char:"bloom",runs:0,kills:0,tut:0,tutDone:0,seen:{},found:{}};
+let save = {coins:0,best:0,unlocked:["bloom"],perks:Object.assign({},PERK0),char:"bloom",runs:0,kills:0,tut:0,tutDone:0,introSeen:0,seen:{},found:{}};
 function persist(){ CG.save("ob_save2", JSON.stringify(save)); }
 
 /* ================================================================ audio */
@@ -411,7 +414,7 @@ function addWeapon(id){ P.weapons[id]=(P.weapons[id]||0)+1; wst[id]=wst[id]||{t:
 
 function reset(){
   const ch=curChar();
-  P={x:0,y:0,vx:0,vy:0,r:22,hp:1,maxHp:0,lvl:1,xp:0,need:6,inv:0,look:0,hurt:0,dx:1,dy:0,dashT:0,dashCd:0,walk:0,yaw:0,tyaw:0,weapons:{},passives:{},evo:{},rng:1,stage:0};
+  P={x:0,y:0,vx:0,vy:0,r:22,hp:1,maxHp:0,lvl:1,xp:0,need:6,inv:0,look:0,hurt:0,dx:1,dy:0,dashT:0,dashCd:0,walk:0,yaw:0,tyaw:0,ax:0,ay:0,still:0,camp:0,weapons:{},passives:{},evo:{},rng:1,stage:0};
   wst={}; for(const w of ch.w) addWeapon(w);
   recalc(); P.hp=P.maxHp; P.pw=powerOf();
   enemies=[];ebul=[];hz=[];shocks=[];bullets=[];pickups=[];parts=[];rings=[];texts=[];bolts=[];decals=[];bubs=[];chaks=[];meteors=[];novas=[];trail=[];motes=[];
@@ -425,8 +428,8 @@ function reset(){
 
 /* ================================================================ spawning */
 function spawnAt(type,x,y,o={}){
-  const T=ET[type], th=threat(), boss=type.startsWith("boss"), sc=(1+time/65+(time/300)**2)*(boss?1+(th-1)*.6:th);
-  const e={id:nextId++,t:type,x,y,vx:o.vx||0,vy:o.vy||0,r:T.r,hp:T.hp*sc*(boss?1+bosses*.5:1),max:0,sp:T.sp*(1+Math.min(time/420,.5))*(1+Math.min((th-1)*.12,.2)),dmg:T.dmg*(1+Math.min(time/400,1.2)),
+  const T=ET[type], th=threat(), boss=type.startsWith("boss"), sc=(1+time/65+(time/300)**2)*(boss?1+(th-1)*.6:th*(1+Math.min(time/240,.8)));
+  const e={id:nextId++,t:type,x,y,vx:o.vx||0,vy:o.vy||0,r:T.r,hp:T.hp*sc*(boss?1+bosses*.5:1),max:0,sp:T.sp*(1+Math.min(time/360,.6))*(1+Math.min((th-1)*.12,.2)),dmg:T.dmg*(1+Math.min(time/400,1.2)),
     xp:T.xp,flash:0,ph:rand(0,TAU),hcd:0,rot:rand(0,TAU),seed:rand(0,1000),age:0,cd:rand(1,2.2),st:0,tm:0,sh:type==="boss"?3.5:0,sum:6,phase:1,vol:3,sp3:0,dc:4,dirx:0,diry:0,elite:false,dead:false,slam:0,slT:0};
   if(!boss&&type!=="mini"&&time>60&&Math.random()<.05+Math.min(time/4000,.1)+Math.min((P.pw||0)*.002,.08)){e.elite=true;e.hp*=3;e.r*=1.25;e.xp*=3;e.dmg*=1.3;}
   e.max=e.hp; enemies.push(e); return e;
@@ -487,10 +490,10 @@ function dropLoot(e){
   if(gemCount>260) addXp(v*P.xpM); else pickups.push({k:"gem",x:e.x,y:e.y,v,t:rand(0,5),fly:false});
   const r=Math.random();
   if(Math.random()<(e.elite?.6:.09)) pickups.push({k:"coin",x:e.x+rand(-14,14),y:e.y+rand(-14,14),t:rand(0,5)});
-  if(r<.009) pickups.push({k:"heart",x:e.x,y:e.y,t:0});
-  else if(r<.018) pickups.push({k:"magnet",x:e.x,y:e.y,t:0});
-  else if(r<.023) pickups.push({k:"bomb",x:e.x,y:e.y,t:0});
-  if(e.elite) pickups.push({k:"heart",x:e.x,y:e.y,t:0});
+  if(r<.0025) pickups.push({k:"heart",x:e.x,y:e.y,t:0});
+  else if(r<.0115) pickups.push({k:"magnet",x:e.x,y:e.y,t:0});
+  else if(r<.0165) pickups.push({k:"bomb",x:e.x,y:e.y,t:0});
+  if(e.elite&&Math.random()<.2) pickups.push({k:"heart",x:e.x,y:e.y,t:0});
   if(boss){
     for(let i=0;i<14;i++) pickups.push({k:"gem",x:e.x+rand(-60,60),y:e.y+rand(-60,60),v:5,t:rand(0,5),fly:false});
     for(let i=0;i<8;i++) pickups.push({k:"coin",x:e.x+rand(-70,70),y:e.y+rand(-70,70),t:rand(0,5)});
@@ -505,7 +508,7 @@ function kill(e){
   decals.push({x:e.x,y:e.y,r:e.r*rand(.9,1.5),c:T.c[1],a:.32,rot:rand(0,TAU)}); if(decals.length>70) decals.shift();
   dropLoot(e);
   // mass only comes back from the swarm you shatter
-  const gain=boss?45:(.8+T.xp*.7)*(e.elite?3:1);
+  const gain=boss?45:(1.2+T.xp)*(e.elite?3:1);
   P.hp=Math.min(P.maxHp,P.hp+gain);
   if(motes.length<120) for(let i=0,n=boss?18:1+(e.elite?3:0);i<n;i++) motes.push({x:e.x+rand(-8,8),y:e.y+rand(-8,8),vx:rand(-160,160),vy:rand(-160,160),l:0});
   if(e.t==="tank"&&state==="play") hz.push({x:e.x,y:e.y,r:e.r*3.4,t:1.1,m:1.1,d:e.dmg*.7,sn:1}); // red giants go supernova
@@ -653,7 +656,10 @@ function update(dt){
   P.x+=P.vx*dt; P.y+=P.vy*dt; P.walk+=Math.hypot(P.vx,P.vy)*dt*.045;
   const pm=Math.hypot(P.x,P.y); if(pm>ARENA-P.r){P.x*=(ARENA-P.r)/pm;P.y*=(ARENA-P.r)/pm;}
   P.inv=Math.max(0,P.inv-dt); P.hurt=Math.max(0,P.hurt-dt);
-  P.hp=Math.min(P.maxHp,P.hp+(P.regen-(1+Math.min(time/120,3.5))*P.drainM)*dt);
+  // loitering: stay inside a small patch of sky for more than 3s and the Veil starts collapsing on you
+  if(tut){ P.still=0; P.ax=P.x; P.ay=P.y; } else if(Math.hypot(P.x-P.ax,P.y-P.ay)>170){ P.ax=P.x; P.ay=P.y; P.still=0; } else P.still+=dt;
+  P.camp=Math.max(0,P.still-3);
+  P.hp=Math.min(P.maxHp,P.hp+(P.regen-(1+Math.min(time/120,3.5))*P.drainM*(1+Math.min(P.camp*.6,4)))*dt);
   if(tut) P.hp=Math.max(P.hp,P.maxHp*(tut.i===3?.35:.8)); // the tutorial can't kill you, and keeps your glow (and weapons) strong outside the mass lesson
   if(P.hp<=0){ die(); return; }
   P.rng=.6+.7*LF(); lightR+=(lightTarget()-lightR)*Math.min(1,dt*3);
@@ -664,13 +670,13 @@ function update(dt){
   // spawning
   spawnT-=dt;
   if(spawnT<=0&&!tut){
-    spawnT=Math.max(.07,.55-time/130)/(.75+.6*LF())/(1+(threat()-1)*.6); // a brighter glow draws more of the dark
-    const n=1+Math.floor(time/30)+Math.floor((P.pw||0)/10);
-    for(let i=0;i<n&&enemies.length<360;i++) spawn(pickType());
+    spawnT=Math.max(.14,.75-time/160)/(.75+.6*LF())/(1+(threat()-1)*.4); // a brighter glow draws more of the dark
+    const n=1+Math.floor(time/55)+Math.floor((P.pw||0)/14);
+    for(let i=0;i<n&&enemies.length<210;i++) spawn(pickType());
   }
   if(!tut&&bossIdx<BOSS_AT.length&&time>=BOSS_AT[bossIdx]){ spawn(BOSS_T[bossIdx],rand(0,TAU)); rings.push({x:P.x,y:P.y,r:10,m:900,l:1,c:"255,210,90"}); sfx.boss(); shake=14; banner={txt:BOSS_N[bossIdx].toUpperCase(),sub:"emerges from the void",t:2.8}; bossIdx++; }
   if(!tut) swarmT-=dt;
-  if(swarmT<=0){ swarmT=50; const t=pick1(time>100?["slime","bat","spiky","mini","wdwarf"]:["slime","bat","spiky","mini"]), n=26+Math.min(20,Math.floor(time/30)+Math.floor((P.pw||0)/6));
+  if(swarmT<=0){ swarmT=50; const t=pick1(time>100?["slime","bat","spiky","mini","wdwarf"]:["slime","bat","spiky","mini"]), n=16+Math.min(12,Math.floor(time/40)+Math.floor((P.pw||0)/8));
     for(let i=0;i<n;i++) spawn(t,i*TAU/n); banner={txt:"SWARM!",sub:"Break the circle",t:2.2}; sfx.boss(); }
 
   // enemies
@@ -688,7 +694,7 @@ function update(dt){
     else if(e.t==="wdwarf"){ const s=Math.sin(e.age*4+e.seed)*.7; tx+=-dy/d*s; ty+=dx/d*s; } // dense and quick, jinking side to side
     else if(e.t==="wolf"){ e.cd-=dt; if(e.cd<=0&&d<620){ e.cd=3.2; const o=rand(0,TAU); for(let i=0;i<10;i++) shootAt(e,175,e.dmg*.6,o+i*TAU/10); } }
     else if(e.t==="magnetar"){ if(d<300) sp*=.3; if(d<460&&P.dashT<=0){ const f=110*(1-d/460); P.x-=dx/d*f*dt; P.y-=dy/d*f*dt; } } // drags you toward it; dashing breaks free
-    else if(e.t==="nursery"){ e.sum-=dt; if(e.sum<=0){ e.sum=5; if(enemies.length<340) for(let i=0;i<3;i++){ const a=rand(0,TAU); spawnAt("mini",e.x+Math.cos(a)*(e.r+16),e.y+Math.sin(a)*(e.r+16),{vx:Math.cos(a)*200,vy:Math.sin(a)*200}); } } }
+    else if(e.t==="nursery"){ e.sum-=dt; if(e.sum<=0){ e.sum=5; if(enemies.length<200) for(let i=0;i<3;i++){ const a=rand(0,TAU); spawnAt("mini",e.x+Math.cos(a)*(e.r+16),e.y+Math.sin(a)*(e.r+16),{vx:Math.cos(a)*200,vy:Math.sin(a)*200}); } } }
     else if(e.t==="ringer"){ if(d<280) sp*=.15; e.cd-=dt; if(e.cd<=0&&d<520){ e.cd=3.4; shocks.push({x:e.x,y:e.y,r:e.r,max:360,d:e.dmg,hit:false}); sfx.nova(); } }
     else if(e.t==="quasar"){ // keeps its distance, then sweeps twin jets across you: 0 idle, 1 warning, 2 firing
       if(d<300){tx=-tx;ty=-ty;} else if(d<440){const px=-ty,py=tx;tx=px;ty=py;sp*=.5;}
@@ -738,7 +744,7 @@ function update(dt){
   ebul=ebul.filter(b=>b.l>0);
 
   // solar flares: telegraphed strikes on your position and your path, so standing still gets you burned
-  hzT-=dt;
+  hzT-=dt*(P.camp>0?3:1);
   if(hzT<=0&&!tut){ hzT=Math.max(1.8,5.5-time/45); const n=1+Math.min(3,Math.floor(time/120));
     for(let i=0;i<n;i++){ const lead=i===0?0:.9*i, x=P.x+P.vx*lead+rand(-60,60)*i, y=P.y+P.vy*lead+rand(-60,60)*i;
       hz.push({x,y,r:95+Math.min(60,time/6),t:1.25,m:1.25,d:12+time/25}); } }
@@ -858,7 +864,7 @@ const TUT=[
   {t:"<b>Solar flare!</b> When an orange circle appears, get out before it erupts. Dodge two.", go:()=>{ tut.fl=0; }, done:s=>s.flares>=2&&!hz.length},
   {t:"Red giants <b>go supernova</b> when they die. Kill this one, then get clear of the blast ring.", go:()=>{ const a=rand(0,TAU); spawnAt("tank",P.x+Math.cos(a)*300,P.y+Math.sin(a)*300); }, done:s=>s.sn&&!hz.length},
   {t:"Grab the glowing <b>NOVA</b> pickup. It blasts every star on screen.", go:()=>{ const a=rand(0,TAU); pickups.push({k:"bomb",x:P.x+Math.cos(a)*240,y:P.y+Math.sin(a)*240,t:0}); for(let i=0;i<12;i++) tutFoe(pick1(["slime","bat","spiky"]),i*TAU/12); }, done:s=>s.bombs>=1},
-  {t:"That's the basics. Level-ups let you pick new powers, and the <b>Star Atlas</b> on the menu explains every enemy. Now survive!", done:s=>s.tt>5}
+  {t:"Last rule: <b>never stand still.</b> Linger in one spot and the Veil collapses on you, burning your mass and calling down flares. Level-ups give you new powers, and the <b>Star Atlas</b> explains every enemy. Now survive!", done:s=>s.tt>7}
 ];
 let tut=null, wantTut=false, tutVis=false;
 function tutFoe(t,a=rand(0,TAU)){ const d=rand(300,380); return spawnAt(t,P.x+Math.cos(a)*d,P.y+Math.sin(a)*d); } // spawn just inside the glow, so you can watch your weapons work
@@ -885,7 +891,7 @@ function tutUpdate(dt){
 }
 function tutShow(){ const on=!!tut&&state==="play"; if(on!==tutVis){ tutVis=on; $("tut").style.display=on?"block":"none"; } }
 $("tutSkip").onclick=e=>{ e.stopPropagation(); tutEnd(false); save.tutDone=1; persist(); };
-$("howTo").onclick=()=>{ wantTut=true; startRun(); };
+$("howTo").onclick=()=>{ wantTut=true; playIntro(startRun); };
 
 /* ================================================================ star atlas: the enemy dictionary */
 const ATLAS={
@@ -969,7 +975,8 @@ function refreshMenu(){ $("menuStats").innerHTML=`◆ ${save.coins} &nbsp;•&nb
 function pause(){ if(state!=="play") return; state="paused"; CG.stop(); $("pause").classList.add("show"); }
 function resume(){ if(state!=="paused") return; $("pause").classList.remove("show"); state="play"; CG.start(); }
 
-$("play").onclick=startRun; $("again").onclick=startRun; $("toMenu").onclick=toMenu;
+function playClick(){ if(!save.introSeen) playIntro(startRun); else startRun(); }
+$("play").onclick=playClick; $("again").onclick=startRun; $("toMenu").onclick=toMenu;
 $("pauseBtn").onclick=pause; $("resume").onclick=resume; $("quit").onclick=()=>{ $("pause").classList.remove("show"); state="paused"; die2(); };
 function die2(){ P.hp=0; state="play"; die(); }
 $("muteBtn").onclick=()=>{ userMute=!userMute; applyMute(); };
@@ -1039,7 +1046,8 @@ addEventListener("keydown",e=>{
   const k=e.key.length===1?e.key.toLowerCase():e.key; keys[k]=true;
   if((k===" "||k==="Shift")&&state==="play") wantDash=true;
   if(state==="levelup"){ if("123".includes(e.key)){const c=$("cards").children[+e.key-1]; c&&c._u&&choose(c._u);} if(k==="r") $("reroll").onclick(); }
-  if(state==="menu"&&(e.key==="Enter")) startRun();
+  if(state==="intro"&&(k==="Enter"||k==="Escape"||k===" ")){ endIntro(); return; }
+  if(state==="menu"&&(e.key==="Enter")) playClick();
   if(k==="Escape"&&state==="atlas"){ $("atlasBack").onclick(); return; }
   if(k==="p"||k==="Escape"){ if(state==="play") pause(); else if(state==="paused") resume(); }
   if(k==="m"){ userMute=!userMute; applyMute(); }
@@ -1487,6 +1495,9 @@ function drawPickup(g){
 }
 function drawHUD(){
   C.lineCap="round";
+  if(state==="play"&&P.camp>0){ const a=.6+.4*Math.sin(clock*9); C.save(); C.textAlign="center"; C.font=`700 ${Math.round(Math.min(26,W*.045))}px 'Exo 2'`;
+    C.lineWidth=5; C.strokeStyle="rgba(30,0,20,.85)"; C.fillStyle=`rgba(255,110,90,${a})`; const y=H*.24;
+    C.strokeText("THE VEIL IS CLOSING IN — MOVE!",W/2,y); C.fillText("THE VEIL IS CLOSING IN — MOVE!",W/2,y); C.restore(); }
   for(const g of pickups){ if(g.k!=="bomb") continue; // off-screen nova pickups get an arrow on the screen edge
     const sx=(g.x-cam.x)*Z+W/2, sy=(g.y-cam.y)*Z+H/2; if(sx>0&&sx<W&&sy>0&&sy<H) continue;
     const a=Math.atan2(sy-H/2,sx-W/2), m=34, ex=clamp(sx,m,W-m), ey=clamp(sy,m,H-m), pu=.6+.4*Math.sin(clock*8);
@@ -1614,12 +1625,85 @@ function render(){
   let tf=0; for(const t of texts){ ctx.globalAlpha=clamp(t.l*2,0,1); if(t.s!==tf){ tf=t.s; ctx.font=`600 ${t.s}px 'Exo 2'`; } ctx.lineWidth=4; ctx.strokeStyle="rgba(20,0,40,.8)"; ctx.strokeText(t.t,t.x,t.y); ctx.fillStyle=t.c; ctx.fillText(t.t,t.x,t.y); }
   ctx.globalAlpha=1; ctx.textBaseline="alphabetic"; ctx.textAlign="left";
   ctx.restore();
-  const v=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.35,W/2,H/2,Math.max(W,H)*.75), lowL=state==="play"&&LF()<.25;
+  const v=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.35,W/2,H/2,Math.max(W,H)*.75), lowL=state==="play"&&(LF()<.25||P.camp>0);
   v.addColorStop(0,"rgba(0,0,0,0)"); v.addColorStop(1,P.hurt>0?"rgba(255,30,80,.45)":lowL?`rgba(255,70,30,${.25+.18*Math.sin(clock*8)})`:"rgba(0,0,10,.5)");
   ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
   if(flash>0){ ctx.globalAlpha=flash*.7; ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
   if(state==="play"||state==="levelup"||state==="paused"||state==="over") drawHUD();
   if(state==="play"||state==="paused"){ const pct=Math.round(100*(1-P.dashCd/P.dashMax)); if(pct!==lastDashPct){ lastDashPct=pct; $("dashBtn").style.setProperty("--p",pct); } }
+}
+
+
+/* ================================================================ opening cutscene */
+const INTRO=[
+  {d:4.2,t:"Once, the sky was full of light."},
+  {d:4.6,t:"Then the Veil came, and one by one the stars went dark."},
+  {d:5.0,t:"What it touched turned hungry, and drifted toward any light that was left."},
+  {d:4.4,t:"But one spark still burns."},
+  {d:5.0,t:""}
+];
+let intro=null;
+function playIntro(then){
+  audio(); hideAll(); setHud(false); state="intro";
+  const st=[]; for(let i=0;i<280;i++) st.push({x:Math.random(),y:Math.random(),r:Math.random()*1.5+.3,tw:Math.random()*TAU,out:Math.random()});
+  const foes=["slime","spiky","tank","bat","splitter","shooter","dasher","wolf","ringer","magnetar","slime","bat","shade","wdwarf"].map((t,i,a)=>({a:i*TAU/a.length+rand(-.12,.12),d:1+rand(0,.45),s:rand(.8,1.15),
+    e:{t,id:i,x:0,y:0,vx:1,vy:0,r:ET[t].r,seed:i*53,ph:0,rot:0,flash:0,elite:false,portrait:true,cd:2,st:0,tm:0,dirx:1,diry:0,phase:1,slam:0,slT:0,hp:1,max:1,age:0,ja:0}}));
+  intro={t:0,st,foes,then,ign:false,ttl:false}; $("introSkip").style.display="block";
+}
+function endIntro(){ if(!intro) return; const f=intro.then; intro=null; $("introSkip").style.display="none"; save.introSeen=1; persist(); if(f) f(); }
+$("introSkip").onclick=e=>{ e.stopPropagation(); endIntro(); };
+$("toIntro").onclick=()=>playIntro(()=>{ state="menu"; refreshMenu(); $("menu").classList.add("show"); });
+function wrapText(t,maxW){ const out=[]; let line=""; for(const w of t.split(" ")){ const tryL=line?line+" "+w:w; if(C.measureText(tryL).width>maxW&&line){ out.push(line); line=w; } else line=tryL; } if(line) out.push(line); return out; }
+function drawIntro(dt){
+  const I=intro; I.t+=dt; const T=I.t; let k=0,acc=0;
+  while(k<INTRO.length&&T>acc+INTRO[k].d){ acc+=INTRO[k].d; k++; }
+  if(k>=INTRO.length){ endIntro(); return; }
+  const lt=T-acc, sc=INTRO[k], M=Math.min(W,H), cx=W/2, cy=H/2;
+  const t1=INTRO[0].d, t2=t1+INTRO[1].d, t3=t2+INTRO[2].d, t4=t3+INTRO[3].d;
+  C=ctx; ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalAlpha=1;
+  const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*.7); bg.addColorStop(0,"#0d0a26"); bg.addColorStop(1,"#030209");
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  // the Veil sweeps across and snuffs the stars it passes
+  const veil=clamp((T-t1)/INTRO[1].d,0,1), vx=-W*.25+veil*W*1.6, sp=clamp((T-t3)/1.4,0,1);
+  for(const s of I.st){ const x=s.x*W, y=s.y*H; let a=.3+.5*(.5+.5*Math.sin(clock*2.2+s.tw));
+    if(x<vx-s.out*W*.22) a*=.05+.95*sp*clamp(1-Math.hypot(x-cx,y-cy)/(M*(.15+.6*sp)),0,1); // dark, until the spark relights the ones nearby
+    ctx.globalAlpha=a; ctx.fillStyle=s.r>1.4?"#ffe9c4":"#dfe8ff"; ctx.beginPath(); ctx.arc(x,y,s.r,0,TAU); ctx.fill(); }
+  ctx.globalAlpha=1;
+  if(veil>0&&veil<1){ const g=ctx.createLinearGradient(vx-W*.4,0,vx+30,0); g.addColorStop(0,"rgba(20,0,30,0)"); g.addColorStop(.8,"rgba(80,20,120,.32)"); g.addColorStop(.97,"rgba(190,90,255,.28)"); g.addColorStop(1,"rgba(190,90,255,0)");
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    for(let i=0;i<14;i++){ const y=(i+.5)*H/14, x=vx-10+Math.sin(clock*3+i*1.7)*16; glow(x,y,46,"rgba(170,80,255,.5)",.35); } }
+  // the hungry stars close in, then recoil from the spark
+  if(T>t2){ const p2=T-t2, fin=clamp(p2/1.2,0,1)*clamp((t4+INTRO[4].d*.55-T)/1,0,1), push=T>t3?(1-Math.pow(1-clamp((T-t3)/1.1,0,1),3)):0;
+    const px=P.x, py=P.y;
+    for(const f of I.foes){ const e=f.e, dist=M*.5*(f.d+.25-Math.min(p2,5.2)*.13)+push*M*.22, x=cx+Math.cos(f.a)*dist, y=cy+Math.sin(f.a)*dist*.8;
+      e.ph=clock*6; e.rot=clock*.6; e.vx=-Math.cos(f.a); e.vy=-Math.sin(f.a); e.cd=2.3-((clock*.9+e.id*.3)%2.3); e.age+=dt;
+      ctx.globalAlpha=fin; glow(x,y,M*.09*f.s,"rgba(255,60,90,.5)",.5);
+      const s=f.s*M/560; P.x=-Math.cos(f.a)*1e3; P.y=-Math.sin(f.a)*1e3; // lit from the centre
+      ctx.save(); ctx.globalAlpha=fin; ctx.setTransform(DPR*s,0,0,DPR*s,DPR*x,DPR*y); drawEnemy(e); ctx.restore(); }
+    P.x=px; P.y=py; ctx.globalAlpha=1; C=ctx; ctx.setTransform(DPR,0,0,DPR,0,0); }
+  // the spark: you
+  if(T>t3){ const p3=T-t3, g=1-Math.pow(1-clamp(p3/1.2,0,1),3), r=M*(.012+.03*g)*(1+.06*Math.sin(clock*11));
+    if(!I.ign){ I.ign=true; sfx.nova(); }
+    glow(cx,cy,r*9,"rgba(255,200,120,.7)",.55*g+.1); glow(cx,cy,r*4,"rgba(255,240,200,.9)",.9);
+    for(let i=0;i<3;i++){ const q=(p3-i*.35); if(q>0&&q<2.2) ringL(cx,cy,q*M*.32,`rgba(255,225,170,${.7*(1-q/2.2)})`,3-i*.6); }
+    ctx.fillStyle="#fffaf0"; ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.fill();
+    for(let i=0;i<4;i++){ const a=clock*.8+i*TAU/4, L=r*(2.6+.5*Math.sin(clock*4+i)); ctx.strokeStyle=`rgba(255,240,210,${.55*g})`; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*r*.6,cy+Math.sin(a)*r*.6); ctx.lineTo(cx+Math.cos(a)*L,cy+Math.sin(a)*L); ctx.stroke(); } }
+  // captions
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  if(sc.t){ const a=clamp(lt/.7,0,1)*clamp((sc.d-lt)/.6,0,1), fz=Math.round(clamp(M*.04,17,30));
+    ctx.font=`500 ${fz}px 'Exo 2'`; const lines=wrapText(sc.t,Math.min(W*.86,760));
+    lines.forEach((L,i)=>{ const y=H*.84+(i-(lines.length-1)/2)*fz*1.35; ctx.globalAlpha=a; ctx.lineWidth=5; ctx.strokeStyle="rgba(3,2,10,.85)"; ctx.strokeText(L,cx,y); ctx.fillStyle="#f3eeff"; ctx.fillText(L,cx,y); }); }
+  else { // title card
+    if(!I.ttl){ I.ttl=true; sfx.level(); }
+    const a=clamp(lt/1,0,1)*clamp((sc.d-lt)/.8,0,1), fz=Math.round(clamp(M*.13,40,120)), y=cy-M*.2;
+    ctx.globalAlpha=a; ctx.font=`700 ${fz}px 'Exo 2'`; try{ ctx.letterSpacing=Math.round(fz*.18)+"px"; }catch(e){}
+    const tg=ctx.createLinearGradient(0,y-fz/2,0,y+fz/2); tg.addColorStop(0,"#fff6d8"); tg.addColorStop(1,"#ffb84a");
+    glow(cx,y,fz*2.2,"rgba(255,190,110,.5)",.45*a); ctx.lineWidth=6; ctx.strokeStyle="rgba(20,6,40,.8)"; ctx.strokeText("STARVEIL",cx,y); ctx.fillStyle=tg; ctx.fillText("STARVEIL",cx,y);
+    try{ ctx.letterSpacing="3px"; }catch(e){} ctx.font=`500 ${Math.round(fz*.2)}px 'Exo 2'`; ctx.fillStyle="#cfd6ff";
+    ctx.fillText("Burn bright  ·  Shatter the swarm  ·  Never stand still",cx,y+fz*.85); try{ ctx.letterSpacing="0px"; }catch(e){} }
+  ctx.globalAlpha=1; ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+  const fade=Math.max(clamp(1-T/1.1,0,1),clamp(1-(t4+INTRO[4].d-T)/.6,0,1)); // fade in from black, and out again
+  if(fade>0){ ctx.fillStyle=`rgba(0,0,0,${fade})`; ctx.fillRect(0,0,W,H); }
 }
 
 /* ================================================================ loop */
@@ -1638,7 +1722,7 @@ function frame(now){
   if(state==="play"){ if(!document.hidden) update(dt); }
   else if(state==="menu"||state==="select"||state==="atlas"){ P.weapons=P.weapons||{}; menuScene(dt); }
   else if(state==="over"){ for(const p of parts){p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt;} parts=parts.filter(p=>p.l>0); shake=Math.max(0,shake-dt*30); lightR+=((victory?900:50)-lightR)*Math.min(1,dt*1.5); }
-  render();
+  if(state==="intro") drawIntro(dt); else render();
   if(state==="select") drawPortraits();
   if(state==="atlas") drawAtlas();
   tutShow();
