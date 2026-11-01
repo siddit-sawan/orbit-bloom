@@ -252,50 +252,132 @@ const PERK0={might:0,vit:0,greed:0,kindle:0,radiance:0,flicker:0};
 let save = {coins:0,best:0,unlocked:["bloom"],perks:Object.assign({},PERK0),char:"bloom",runs:0,kills:0,tut:0,tutDone:0,introSeen:0,seen:{},found:{}};
 function persist(){ CG.save("ob_save2", JSON.stringify(save)); }
 
-/* ================================================================ audio */
-let AC=null, master=null;
+/* ================================================================ audio: a procedural cosmic soundscape */
+let AC=null, master=null, sfxBus=null, musBus=null, verbIn=null, noiseBuf=null, introBus=null, drone=null;
 function audio(){
-  if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); master = AC.createGain(); master.connect(AC.destination); applyMute(); }catch(e){} }
-  if(AC && AC.state==="suspended") AC.resume();
+  if(!AC){ try{
+    AC=new (window.AudioContext||window.webkitAudioContext)();
+    master=AC.createGain(); const comp=AC.createDynamicsCompressor(); comp.threshold.value=-16; comp.ratio.value=4; comp.attack.value=.003; comp.release.value=.3;
+    master.connect(comp); comp.connect(AC.destination);
+    const verb=AC.createConvolver(); verb.buffer=impulse(3.8,2.6); const vg=AC.createGain(); vg.gain.value=.6; // a vast dark hall: every sound trails off into space
+    verbIn=AC.createGain(); verbIn.connect(verb); verb.connect(vg); vg.connect(master);
+    sfxBus=AC.createGain(); sfxBus.gain.value=.9; sfxBus.connect(master);
+    musBus=AC.createGain(); musBus.gain.value=.85; musBus.connect(master);
+    noiseBuf=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate); const d=noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    applyMute(); }catch(e){} }
+  if(AC&&AC.state==="suspended") AC.resume();
 }
+function impulse(sec,decay){ const n=Math.floor(AC.sampleRate*sec), b=AC.createBuffer(2,n,AC.sampleRate);
+  for(let c=0;c<2;c++){ const d=b.getChannelData(c); for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,decay); } return b; }
+const live=()=>!!AC&&!CG.muted&&!adPlaying&&!userMute;
 function applyMute(){ if(master) master.gain.value = (CG.muted||adPlaying||userMute) ? 0 : 0.5; $("muteBtn").textContent=userMute?"✕":"♪"; $("pMute").textContent="SOUND: "+(userMute?"OFF":"ON"); }
-function tone(f,d,type="sine",v=.15,slide=0){
-  if(!AC||CG.muted||adPlaying||userMute) return;
-  const o=AC.createOscillator(), g=AC.createGain(), t=AC.currentTime;
-  o.type=type; o.frequency.setValueAtTime(f,t);
-  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30,f+slide),t+d);
-  g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(.0001,t+d);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+d);
+function sendTo(g,amt,bus){ if(!amt) return; const s=AC.createGain(); s.gain.value=amt; g.connect(s); s.connect((bus&&bus.verb)||verbIn); }
+function env(g,t,v,a,d){ g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v,t+a); g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(d,a+.02)); }
+function voice(o){ // one oscillator: {f,d,v,type,a,slide,cut,q,det,verb,bus,at}
+  if(!live()) return;
+  const t=AC.currentTime+(o.at||0), osc=AC.createOscillator(), g=AC.createGain();
+  osc.type=o.type||"sine"; osc.frequency.setValueAtTime(o.f,t); if(o.det) osc.detune.value=o.det;
+  if(o.slide) osc.frequency.exponentialRampToValueAtTime(Math.max(20,o.f+o.slide),t+o.d);
+  env(g,t,o.v,o.a||.005,o.d);
+  let n=osc; if(o.cut){ const fl=AC.createBiquadFilter(); fl.type="lowpass"; fl.frequency.value=o.cut; fl.Q.value=o.q||.7; osc.connect(fl); n=fl; }
+  n.connect(g); g.connect(o.bus||sfxBus); sendTo(g,o.verb,o.bus); osc.start(t); osc.stop(t+o.d+.05);
+}
+function noise(o){ // filtered noise: {d,v,f,f2,q,type,a,verb,bus,at}
+  if(!live()) return;
+  const t=AC.currentTime+(o.at||0), src=AC.createBufferSource(), fl=AC.createBiquadFilter(), g=AC.createGain();
+  src.buffer=noiseBuf; src.loop=true; fl.type=o.type||"bandpass"; fl.frequency.setValueAtTime(o.f,t); if(o.f2) fl.frequency.exponentialRampToValueAtTime(o.f2,t+o.d); fl.Q.value=o.q||1;
+  env(g,t,o.v,o.a||.005,o.d);
+  src.connect(fl); fl.connect(g); g.connect(o.bus||sfxBus); sendTo(g,o.verb,o.bus); src.start(t,Math.random()*1.5); src.stop(t+o.d+.05);
+}
+function bell(f,d,v,o={}){ // struck crystal: slightly inharmonic partials that ring out into the reverb
+  for(const [m,k] of[[1,1],[2.76,.4],[5.4,.18],[8.93,.08]]) voice({f:f*m,d:m>1?d*.45:d,v:v*k,type:"sine",verb:o.verb===undefined?.5:o.verb,at:o.at,bus:o.bus,a:.003});
+}
+function pad(at,dur,fs,v,c0,c1,bus,type="sawtooth"){ // slow-blooming detuned chord through a moving filter
+  if(!live()) return; const t=AC.currentTime+at, fl=AC.createBiquadFilter(), g=AC.createGain();
+  fl.type="lowpass"; fl.Q.value=.9; fl.frequency.setValueAtTime(c0,t); fl.frequency.exponentialRampToValueAtTime(c1,t+dur);
+  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v,t+Math.min(1.8,dur*.4)); g.gain.setValueAtTime(v,t+dur*.72); g.gain.linearRampToValueAtTime(0,t+dur);
+  fl.connect(g); g.connect(bus||musBus); sendTo(g,.7,bus);
+  for(const f of fs) for(const dt of[-8,8]){ const o=AC.createOscillator(); o.type=type; o.frequency.value=f; o.detune.value=dt; o.connect(fl); o.start(t); o.stop(t+dur+.1); }
+}
+function braam(at=0,root=55,v=.18,bus){ // the deep cinematic horn hit: detuned saws through a filter that bursts open then closes
+  if(!live()) return; const t=AC.currentTime+at;
+  for(const [m,det] of[[1,-9],[1,9],[1.5,0],[2,-5],[.5,0]]){ const o=AC.createOscillator(), f=AC.createBiquadFilter(), g=AC.createGain();
+    o.type="sawtooth"; o.frequency.value=root*m; o.detune.value=det; f.type="lowpass"; f.Q.value=2.2;
+    f.frequency.setValueAtTime(180,t); f.frequency.linearRampToValueAtTime(1500,t+.22); f.frequency.exponentialRampToValueAtTime(150,t+2.8);
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v/(m>1.2?2.2:1),t+.07); g.gain.exponentialRampToValueAtTime(.0001,t+3.2);
+    o.connect(f); f.connect(g); g.connect(bus||musBus); sendTo(g,.45,bus); o.start(t); o.stop(t+3.3); }
+  noise({d:1.6,v:v*.7,f:400,f2:50,q:.7,type:"lowpass",at,bus:bus||musBus,verb:.3});
 }
 let lastHitSfx=0; const thr={};
-function once(k,gap,fn){ if(clock-(thr[k]||-9)>gap){ thr[k]=clock; fn(); } } // big swarms die dozens per second: don't spawn an oscillator for each
+function once(k,gap,fn){ if(clock-(thr[k]||-9)>gap){ thr[k]=clock; fn(); } } // big swarms die dozens per second: don't spawn voices for each
+const PENT=[0,3,5,7,10], note=(base,i)=>base*Math.pow(2,(PENT[((i%5)+5)%5]+12*Math.floor(i/5))/12); // D minor pentatonic: every random note agrees with the score
 const sfx = {
-  shoot:()=>tone(620,.08,"triangle",.04,-300),
-  hit:()=>{ if(clock-lastHitSfx>.04){lastHitSfx=clock;tone(240,.07,"square",.04,-120);} },
-  pop:()=>once("pop",.035,()=>tone(420,.14,"sine",.1,380)),
-  gem:()=>once("gem",.03,()=>tone(900+Math.random()*300,.07,"sine",.05)),
-  coin:()=>{tone(1200,.06,"square",.04);setTimeout(()=>tone(1600,.1,"square",.04),50);},
-  hurt:()=>tone(150,.25,"sawtooth",.14,-90),
-  zap:()=>tone(1400,.15,"sawtooth",.06,-1000),
-  nova:()=>tone(200,.35,"sine",.14,500),
-  boom:()=>tone(110,.4,"sawtooth",.16,-70),
-  dash:()=>tone(300,.15,"triangle",.1,500),
-  heal:()=>{tone(600,.12,"sine",.1);setTimeout(()=>tone(900,.18,"sine",.1),90);},
-  level:()=>{tone(520,.15,"triangle",.14);setTimeout(()=>tone(780,.15,"triangle",.14),90);setTimeout(()=>tone(1040,.25,"triangle",.14),180);},
-  boss:()=>{tone(90,.8,"sawtooth",.18,-30);setTimeout(()=>tone(70,.8,"sawtooth",.18,-20),300);}
+  shoot:()=>once("sh",.06,()=>voice({f:1500,d:.1,v:.026,type:"sine",slide:-1000,verb:.12})),                       // a mote of light flicked out
+  hit:()=>{ if(clock-lastHitSfx>.05){ lastHitSfx=clock; noise({d:.05,v:.05,f:2600,q:2.5}); } },                     // plasma crackle
+  pop:()=>once("pop",.05,()=>{ bell(note(587,(Math.random()*7)|0),.45,.04,{verb:.35}); noise({d:.2,v:.045,f:3200,f2:500,q:1}); }), // a star shatters: crystal chime and a puff of gas
+  gem:()=>once("gem",.045,()=>voice({f:note(1175,(Math.random()*5)|0),d:.2,v:.022,type:"sine",verb:.35})),
+  coin:()=>{ bell(1760,.4,.035); bell(2637,.5,.03,{at:.06}); },
+  hurt:()=>{ voice({f:110,d:.4,v:.22,type:"sawtooth",slide:-65,cut:500,q:3}); noise({d:.3,v:.14,f:500,q:.7,type:"lowpass"}); },
+  zap:()=>{ noise({d:.16,v:.07,f:5200,f2:1400,q:4}); voice({f:2400,d:.12,v:.018,type:"square",slide:-1800,cut:3200}); },  // arcing static
+  nova:()=>{ noise({d:.7,v:.09,f:180,f2:2600,q:1.3,verb:.45}); voice({f:98,d:.55,v:.13,type:"sine",slide:-45}); },          // a shockwave whoosh
+  boom:()=>{ noise({d:1,v:.22,f:1000,f2:80,q:.8,type:"lowpass",verb:.5}); voice({f:73,d:.9,v:.24,type:"sine",slide:-42}); },
+  dash:()=>noise({d:.3,v:.1,f:500,f2:3600,q:1.5,verb:.25}),                                                                  // solar wind
+  heal:()=>{ for(let i=0;i<3;i++) bell(note(587,i*2+2),.7,.03,{at:i*.07}); },
+  level:()=>{ for(let i=0;i<5;i++) bell(note(440,i*2+3),1.2,.045,{at:i*.085,verb:.75}); noise({d:1.4,v:.035,f:4500,f2:9000,q:.5,type:"highpass",verb:.7}); },
+  boss:()=>braam(0,41.2,.2)
 };
+/* in-run score: a living drone with a starlight arpeggio over it, intensifying as the run (and the threat) builds */
 let musicOn=false, mStep=0;
+const ROOTS=[0,-4,5,-2], DRONE_F=[36.71,73.42,73.42,110];
+function startDrone(){ if(drone||!AC) return;
+  const fl=AC.createBiquadFilter(), g=AC.createGain(), lfo=AC.createOscillator(), lg=AC.createGain();
+  fl.type="lowpass"; fl.frequency.value=260; fl.Q.value=1.6; lfo.frequency.value=.06; lg.gain.value=120; lfo.connect(lg); lg.connect(fl.frequency); lfo.start();
+  g.gain.value=0; fl.connect(g); g.connect(musBus); sendTo(g,.5);
+  const os=DRONE_F.map((f,i)=>{ const o=AC.createOscillator(), og=AC.createGain(); o.type=["sine","sawtooth","sawtooth","triangle"][i]; o.frequency.value=f; o.detune.value=[0,-9,9,4][i]; og.gain.value=[1.3,.45,.45,.3][i]; o.connect(og); og.connect(fl); o.start(); return o; });
+  drone={fl,g,os};
+}
 function musicLoop(){
   if(!musicOn) return;
-  if(state==="play"&&AC&&!CG.muted&&!adPlaying&&!userMute){
-    const sc=[0,3,5,7,10,12,15,17,19], root=[0,0,5,3][Math.floor(mStep/16)%4];
-    const n=sc[(mStep*3+Math.floor(mStep/8))%sc.length]+root;
-    tone(110*Math.pow(2,n/12),.35,"triangle",.045);
-    if(mStep%4===0) tone(55*Math.pow(2,root/12),.5,"sine",.07);
-    if(mStep%2===1&&time>60) tone(220*Math.pow(2,(sc[(mStep*5)%sc.length]+root)/12),.18,"sine",.025);
+  const playing=state==="play"&&live(), boss=enemies.some(e=>e.t.startsWith("boss"));
+  const int=clamp(time/300+(threat()-1)*.15+(boss?.4:0),0,1), r=ROOTS[Math.floor(mStep/32)%4];
+  if(AC){ startDrone(); const n=AC.currentTime;
+    drone.g.gain.setTargetAtTime(playing?.05+.04*int:0,n,.8); drone.fl.frequency.setTargetAtTime(220+1000*int,n,1.5);
+    if(mStep%32===0) drone.os.forEach((o,i)=>o.frequency.setTargetAtTime(DRONE_F[i]*Math.pow(2,r/12),n,.6)); }
+  if(playing){
+    if(Math.random()<.32+.4*int){ const f=note(293.66*Math.pow(2,r/12),(Math.random()*8)|0); voice({f,d:1.4,v:.02,type:"sine",verb:.85,bus:musBus,a:.01}); voice({f:f*2,d:.5,v:.005,type:"triangle",verb:.85,bus:musBus}); }
+    if(int>.3&&mStep%4===0) voice({f:64,d:.32,v:.13*int,type:"sine",slide:-32,bus:musBus});                  // a heartbeat pulse
+    if(int>.55&&mStep%2===1) noise({d:.05,v:.018*int,f:8000,q:.7,type:"highpass",bus:musBus});
+    if(boss&&mStep%16===0) pad(0,4.4,[73.42*Math.pow(2,r/12),77.78*Math.pow(2,r/12)],.03,300,900,musBus);   // a dissonant undertow while a boss lives
   }
-  mStep++; setTimeout(musicLoop, clamp(250-time*.25,150,250));
+  mStep++; setTimeout(musicLoop,280-int*60);
 }
+/* the intro's score, timed to its five shots */
+function introScore(){
+  if(!live()) return; if(introBus){ try{ introBus.disconnect(); introBus.verb.disconnect(); }catch(e){} }
+  const B=introBus=AC.createGain(); B.connect(master); B.verb=AC.createGain(); B.verb.connect(verbIn);
+  const D3=146.83, F3=174.61, A3=220, E4=329.63, D2=73.42, Eb2=77.78, A2=110, Fs3=185;
+  // 1. a sky full of light: a warm open chord and drifting chimes
+  pad(0,5,[D3,F3,A3,E4],.045,500,1700,B,"triangle"); pad(0,5,[D2],.05,300,500,B);
+  [.5,1.2,1.9,2.5,3.2,3.8].forEach((t,i)=>bell(note(587,[4,2,5,3,7,6][i]),1.6,.03,{at:t,verb:.9,bus:B}));
+  // 2. the Veil: the light curdles into a low cluster and the filter closes
+  pad(4.1,5.2,[D2,Eb2,A2],.06,1400,220,B); pad(4.1,5.2,[D3*.5*Math.pow(2,1/12)],.03,600,200,B,"square");
+  [4.6,5.5,6.4,7.3].forEach((t,i)=>bell(note(440,6-i*2)*.94,1.4,.025,{at:t,verb:.9,bus:B}));
+  noise({at:6.4,d:2.4,v:.06,f:150,f2:1800,q:.8,a:2.3,type:"lowpass",bus:B,verb:.5});
+  // 3. the hungry stars: a heartbeat under rising strings and a long riser
+  for(let i=0;i<6;i++){ voice({at:8.8+i*.82,f:58,d:.4,v:.3,type:"sine",slide:-28,bus:B}); voice({at:9.02+i*.82,f:52,d:.35,v:.16,type:"sine",slide:-24,bus:B}); }
+  pad(8.8,5.1,[A2,A2*1.5,A2*2*Math.pow(2,1/12)],.035,300,2600,B);
+  noise({at:10.6,d:3.2,v:.09,f:300,f2:7000,q:1.4,a:3.1,bus:B,verb:.4});
+  // 4. one spark: impact, then a major chord blooms
+  braam(13.8,36.71,.2,B); noise({at:13.8,d:2.2,v:.12,f:6000,f2:2000,q:.6,type:"highpass",bus:B,verb:.8});
+  pad(13.95,9,[D3,Fs3,A3,E4,587.33],.045,700,3000,B); pad(13.95,9,[D2,A2],.05,400,900,B,"triangle");
+  [14.7,15.15,15.6,16.05,16.6].forEach((t,i)=>bell([440,587.33,659.25,739.99,880][i],2.2,.04,{at:t,verb:.95,bus:B}));
+  // 5. the title: one last hit and a shimmer that rings out
+  braam(18.2,73.42,.15,B); noise({at:18.2,d:3.5,v:.06,f:7000,q:.5,type:"highpass",bus:B,verb:.9});
+  [18.4,18.55,18.7].forEach((t,i)=>bell([1174.66,1479.98,1760][i],3,.025,{at:t,verb:1,bus:B}));
+}
+function stopIntroScore(){ if(!introBus||!AC) return; const B=introBus, n=AC.currentTime; introBus=null;
+  for(const g of[B,B.verb]){ g.gain.cancelScheduledValues(n); g.gain.setValueAtTime(g.gain.value,n); g.gain.linearRampToValueAtTime(0,n+.6); }
+  setTimeout(()=>{ try{ B.disconnect(); B.verb.disconnect(); }catch(e){} },900); }
 
 /* ================================================================ sprite caches */
 const glowCache={}, orbCache={};
@@ -1217,9 +1299,11 @@ function pSphere(r,c,seed,cells,spots,wob=0,t=0){
   for(let i=0;i<cells;i++){ // granulation: hot convection cells
     const a=hsh(seed,i)*TAU+t*TAU*(i%2?.06:-.06), d=Math.sqrt(hsh(seed,i+99))*r, cr=r*(.07+.08*hsh(seed,i+199)), x=Math.cos(a)*d, y=Math.sin(a)*d;
     const gg=C.createRadialGradient(x,y,0,x,y,cr); gg.addColorStop(0,hexA(c[0],.32)); gg.addColorStop(1,hexA(c[0],0)); C.fillStyle=gg; C.fillRect(x-cr,y-cr,cr*2,cr*2); }
+  if(r>6) pVeins(r,seed,hexA(c[0],.9)); // the Veil's corruption: dark fissures with a molten seam
+  { const a=hsh(seed,77)*TAU, x=Math.cos(a)*r*.45, y=Math.sin(a)*r*.45, gb=C.createRadialGradient(x,y,0,x,y,r*.75); gb.addColorStop(0,"rgba(14,0,26,.55)"); gb.addColorStop(1,"rgba(14,0,26,0)"); C.fillStyle=gb; C.fillRect(-r,-r,r*2,r*2); } // a spreading stain
   if(spots) for(const [sx,sy,sz] of spots){ dot(sx*r,sy*r,sz*r*1.6,hexA(c[2],.18)); dot(sx*r,sy*r,sz*r,hexA(c[2],.45)); } // starspots: soft umbra in a fainter penumbra
-  const lg=C.createRadialGradient(0,0,r*.5,0,0,r*1.05); lg.addColorStop(0,"rgba(0,0,0,0)"); lg.addColorStop(1,hexA(c[2],.6)); C.fillStyle=lg; C.fillRect(-r*1.2,-r*1.2,r*2.4,r*2.4); // limb darkening
-  const hg=C.createRadialGradient(-r*.32,-r*.34,0,-r*.32,-r*.34,r*.6); hg.addColorStop(0,"rgba(255,255,255,.55)"); hg.addColorStop(1,"rgba(255,255,255,0)"); C.fillStyle=hg; C.fillRect(-r,-r,r*2,r*2);
+  const lg=C.createRadialGradient(0,0,r*.5,0,0,r*1.05); lg.addColorStop(0,"rgba(0,0,0,0)"); lg.addColorStop(.8,hexA(c[2],.45)); lg.addColorStop(1,"rgba(16,0,28,.85)"); C.fillStyle=lg; C.fillRect(-r*1.2,-r*1.2,r*2.4,r*2.4); // limb darkening
+  const hg=C.createRadialGradient(-r*.32,-r*.34,0,-r*.32,-r*.34,r*.6); hg.addColorStop(0,"rgba(255,255,255,.12)"); hg.addColorStop(1,"rgba(255,255,255,0)"); C.fillStyle=hg; C.fillRect(-r,-r,r*2,r*2);
   C.restore();
   starPath(r,wob,t); C.strokeStyle=hexA(c[0],.5); C.lineWidth=.6+r*.04; C.stroke(); // chromosphere rim
 }
@@ -1245,36 +1329,55 @@ function pTail(r,cA,cB,len,dust){ // streak trailing back along -x
   for(let i=0;i<dust;i++){ const f=hsh(7,i), d=f*len*r, o=(hsh(8,i)-.5)*r*1.3*(1-f); C.globalAlpha=(1-f)*.9; sparkle(-d,o,r*(.07+.12*hsh(9,i)),"#fff",hsh(10,i)*3); }
   C.globalAlpha=1;
 }
+function pVeins(r,seed,hot){
+  const paths=[]; for(let k=0;k<3;k++){ const a=hsh(seed,k+300)*TAU, d=r*(.1+.55*hsh(seed,k+310)); let x=Math.cos(a)*d, y=Math.sin(a)*d, h=hsh(seed,k+320)*TAU; const p=[[x,y]];
+    for(let j=0;j<7;j++){ h+=(hsh(seed,k*10+j+330)-.5)*.8; x+=Math.cos(h)*r*.17; y+=Math.sin(h)*r*.17; p.push([x,y]); } paths.push(p); }
+  C.lineCap="round"; C.lineJoin="round";
+  for(const [w,col] of[[r*.14,"rgba(10,0,22,.28)"],[r*.055,"rgba(10,0,22,.75)"],[r*.02,hot]]){ C.strokeStyle=col; C.lineWidth=w;
+    for(const p of paths){ C.beginPath(); p.forEach(([x,y],i)=>i?C.lineTo(x,y):C.moveTo(x,y)); C.stroke(); } }
+}
+function pTendrils(r,seed,n,t=0,reach=.8){ // wisps of the Veil clinging to a star, tapering as they reach out
+  C.lineCap="round";
+  for(let i=0;i<n;i++){ const a=hsh(seed,i+400)*TAU+Math.sin(t*TAU+i*1.3)*.14, L=r*reach*(.6+.4*hsh(seed,i+410)), cv=(hsh(seed,i+420)-.5)*1.5;
+    const x0=Math.cos(a)*r*.8, y0=Math.sin(a)*r*.8, x1=Math.cos(a+cv*.35)*(r+L), y1=Math.sin(a+cv*.35)*(r+L), mx=Math.cos(a+cv*.22)*(r+L*.5), my=Math.sin(a+cv*.22)*(r+L*.5);
+    for(const [w,col] of[[r*.32,"rgba(130,50,210,.18)"],[r*.12,"rgba(14,0,28,.6)"]]){ C.strokeStyle=col;
+      for(let k=0;k<6;k++){ const u0=k/6, u1=(k+1)/6, q=(u)=>[(1-u)*(1-u)*x0+2*(1-u)*u*mx+u*u*x1,(1-u)*(1-u)*y0+2*(1-u)*u*my+u*u*y1], A=q(u0), Bq=q(u1);
+        C.lineWidth=w*(1-u0*.85); C.beginPath(); C.moveTo(A[0],A[1]); C.lineTo(Bq[0],Bq[1]); C.stroke(); } } }
+}
+function pSpikes(R,n,col,rot=0,w=.05){ // diffraction spikes, as a telescope sees a point of light
+  for(let i=0;i<n;i++){ C.save(); C.rotate(rot+i*TAU/n); const g=C.createLinearGradient(0,0,R,0); g.addColorStop(0,"rgba(255,255,255,.95)"); g.addColorStop(.2,hexA(col,.65)); g.addColorStop(1,hexA(col,0));
+    C.fillStyle=g; C.beginPath(); C.moveTo(0,-R*w); C.lineTo(R,0); C.lineTo(0,R*w); C.closePath(); C.fill(); C.restore(); }
+}
 function pHaze(R,col,a){ const g=C.createRadialGradient(0,0,0,0,0,R); g.addColorStop(0,hexA(col,a)); g.addColorStop(1,hexA(col,0)); C.fillStyle=g; C.fillRect(-R,-R,R*2,R*2); }
 
 const BLUE=["#eef6ff","#7ab8ff","#0c2050"];
 const SP={
   dwarf:(v,i)=>sprite(`dw${v}_${i}`,ET.slime.r*1.85,()=>{ const r=ET.slime.r, c=ET.slime.c, t=i/NF, s=11+v*37;
-    pCorona(r,10,c[1],.55,t,s); pProm(r,hsh(s,3)*TAU+Math.sin(t*TAU)*.15,.3+.06*Math.sin(t*TAU),c[0]); pProm(r,hsh(s,4)*TAU,.2,c[1]);
+    pCorona(r,10,c[1],.55,t,s); pTendrils(r,s,5,t,.75); pProm(r,hsh(s,3)*TAU+Math.sin(t*TAU)*.15,.3+.06*Math.sin(t*TAU),c[0]); pProm(r,hsh(s,4)*TAU,.2,c[1]);
     pSphere(r,c,s,26,v?[[.3,-.15,.13],[-.32,.32,.09]]:[[-.25,-.2,.1],[.2,.35,.12],[.42,-.1,.06]],0,t); }),
   cinder:()=>sprite("ci",ET.mini.r*2.6,()=>{ const r=ET.mini.r, c=ET.mini.c;
     pHaze(r*1.6,c[1],.5);
-    for(const [R,w,rot,al] of[[r*2.5,.3,0,1],[r*1.4,.25,Math.PI/4,.6]]){ starP(0,0,R,r*w,4,rot);
-      const g=C.createRadialGradient(0,0,0,0,0,R); g.addColorStop(0,`rgba(255,255,255,${al})`); g.addColorStop(.3,hexA(c[1],al*.8)); g.addColorStop(1,hexA(c[1],0)); C.fillStyle=g; C.fill(); }
-    pSphere(r*.55,c,3,5); dot(0,0,r*.2,"#fff"); }),
-  shoot:()=>sprite("sh",ET.spiky.r*1.45,()=>{ const r=ET.spiky.r, c=ET.spiky.c, R=r*1.15, ri=r*.5;
-    pHaze(r*1.45,c[1],.55);
-    for(let i=0;i<5;i++){ const a=-Math.PI/2+i*TAU/5, tx=Math.cos(a)*R, ty=Math.sin(a)*R; // bevelled points: a lit facet and a shaded facet each
-      for(const [o,col] of[[-1,c[0]],[1,c[1]]]){ const b=a+o*TAU/10; C.beginPath(); C.moveTo(0,0); C.lineTo(tx,ty); C.lineTo(Math.cos(b)*ri,Math.sin(b)*ri); C.closePath(); C.fillStyle=col; C.fill(); } }
-    const g=C.createRadialGradient(0,0,0,0,0,R); g.addColorStop(0,"rgba(255,255,255,.9)"); g.addColorStop(.45,"rgba(255,255,255,0)"); g.addColorStop(1,hexA(c[2],.45));
-    starP(0,0,R,ri,5,-Math.PI/2); C.fillStyle=g; C.fill(); C.strokeStyle="rgba(255,255,255,.95)"; C.lineWidth=1.1; C.lineJoin="round"; C.stroke();
-    sparkle(0,0,r*.55,"#fff",0); dot(0,0,r*.14,"#fff"); }),
+    pSpikes(r*2.5,4,c[1],0,.06); pSpikes(r*1.3,4,c[1],Math.PI/4,.05);
+    pSphere(r*.55,c,3,5); pHaze(r*.35,"#ffffff",.9); }),
+  shoot:()=>sprite("sh",ET.spiky.r*1.45,()=>{ const r=ET.spiky.r, c=ET.spiky.c;
+    pHaze(r*1.45,c[1],.4);
+    const pts=[]; for(let i=0;i<9;i++){ const a=i*TAU/9+(hsh(61,i)-.5)*.5, d=r*(.62+.4*hsh(62,i))*(i%3===0?1.3:1); pts.push([Math.cos(a)*d,Math.sin(a)*d]); }
+    const path=()=>{ C.beginPath(); pts.forEach(([x,y],i)=>i?C.lineTo(x,y):C.moveTo(x,y)); C.closePath(); };
+    path(); C.strokeStyle=hexA(c[1],.35); C.lineWidth=r*.3; C.lineJoin="round"; C.stroke();
+    path(); const g=C.createRadialGradient(-r*.3,-r*.3,r*.1,0,0,r*1.2); g.addColorStop(0,"#3c3a5c"); g.addColorStop(1,"#08060f"); C.fillStyle=g; C.fill();
+    C.save(); path(); C.clip(); pVeins(r*.95,63,"rgba(215,240,255,.95)"); C.restore();
+    path(); C.strokeStyle=hexA(c[0],.95); C.lineWidth=r*.07; C.stroke();
+    pSpikes(r*1.35,2,c[0],.5,.05); }),
   tail:(k)=>{ const r=ET.spiky.r; return sprite("tl"+k,0,()=>{ k==="ice"?pTail(r,"#e8f6ff","#7ab8ff",5.2,16):pTail(r,"#fff0b0","#ff6a2a",4.6,10); },[-r*6.4,-r*1.05,r*.4,r*1.05]); },
   giant:(v,i)=>sprite(`gi${v}_${i}`,ET.tank.r*1.9,()=>{ const r=ET.tank.r, c=ET.tank.c, t=i/NF, s=23+v*41;
-    pCorona(r,14,c[1],.6,t,s);
+    pCorona(r,14,c[1],.6,t,s); pTendrils(r,s,7,t,.8);
     for(let j=0;j<3;j++) pProm(r,hsh(s,j+30)*TAU+Math.sin(t*TAU+j)*.12,(.22+.14*hsh(s,j+40))*(1+.15*Math.sin(t*TAU+j*2)),c[0]);
     pSphere(r,c,s,60,[[.3,-.25,.07],[-.35,.2,.06]],.035,t); }),
   ceph:(i)=>sprite("ce"+i,ET.bat.r*2.8,()=>{ const r=ET.bat.r, c=ET.bat.c, t=i/12, p=Math.sin(t*TAU), rr=r*(.8+.22*p);
     for(let k=0;k<2;k++){ const f=(t+k*.5)%1; ringL(0,0,r*(1+f*1.6),hexA(c[1],.65*(1-f)),.4+1.8*(1-f)); }
     pHaze(r*2.1,c[1],.3+.2*p);
-    starP(0,0,rr*(1.8+.4*p),rr*.32,6,t*TAU/6); { const g=C.createRadialGradient(0,0,0,0,0,rr*2.2); g.addColorStop(0,"#fff"); g.addColorStop(.35,hexA(c[1],.8)); g.addColorStop(1,hexA(c[1],0)); C.fillStyle=g; C.fill(); }
-    starP(0,0,rr*1.3,rr*.3,6,t*TAU/6+Math.PI/6); C.fillStyle=hexA(c[0],.45); C.fill();
-    pSphere(rr,c,13,10); dot(0,0,rr*.35,hexA("#ffffff",.5+.4*p)); }),
+    pSpikes(rr*(2+.5*p),6,c[1],Math.PI/6,.045); pTendrils(rr,13,4,t,.7);
+    pSphere(rr,c,13,10); pHaze(rr*.5,"#ffffff",.3+.4*p); }),
   bin:(b,i)=>sprite(`bi${b}_${i}`,ET.splitter.r*(b?.75:.95),()=>{ const R=ET.splitter.r*(b?.4:.55), c=b?BLUE:ET.splitter.c, t=i/6;
     pCorona(R,8,c[1],.45,t,b?5:9); pSphere(R,c,b?5:9,10,b?null:[[.3,.2,.12]]); }),
   pulsar:()=>sprite("pu",ET.shooter.r*1.7,()=>{ const r=ET.shooter.r, c=ET.shooter.c;
@@ -1288,7 +1391,7 @@ const SP={
   flare:(m,i)=>sprite(`fl${m}_${i}`,ET.dasher.r*(m?2.8:1.75),()=>{ const r=ET.dasher.r, c=ET.dasher.c, t=i/NF, s=71;
     if(m){ pCorona(r,10,"#ffd27a",1.45,t,s); for(let j=0;j<4;j++) pProm(r,hsh(s,j+20)*TAU+Math.sin(t*TAU)*.2,.42+.2*hsh(s,j),"#fff0c0");
       C.globalCompositeOperation="lighter"; pHaze(r*1.1,"#ffe0a0",.6); C.globalCompositeOperation="source-over"; }
-    else { pCorona(r,9,c[1],.4,t,s); pProm(r,hsh(s,1)*TAU+Math.sin(t*TAU)*.2,.3,c[0]); pSphere(r,c,s,24,[[-.2,.25,.12],[.35,-.1,.08]],0,t); } }),
+    else { pCorona(r,9,c[1],.4,t,s); pTendrils(r,s,5,t,.6); pProm(r,hsh(s,1)*TAU+Math.sin(t*TAU)*.2,.3,c[0]); pSphere(r,c,s,24,[[-.2,.25,.12],[.35,-.1,.08]],0,t); } }),
   dead:()=>sprite("dd",ET.shade.r*1.75,()=>{ const r=ET.shade.r;
     C.save(); C.scale(1,.5); C.beginPath(); C.arc(0,0,r*1.5,Math.PI,TAU); C.strokeStyle="rgba(200,184,255,.35)"; C.lineWidth=1.6; C.stroke(); C.restore(); // lensed light, far side
     const g=C.createRadialGradient(-r*.35,-r*.35,r*.1,0,0,r); g.addColorStop(0,"#211a38"); g.addColorStop(1,"#030208"); dot(0,0,r,g);
@@ -1308,13 +1411,12 @@ const SP={
   pin:()=>sprite("pin",2,()=>{ pHaze(2,"#ffffff",1); }),
   wd:()=>sprite("wd",ET.wdwarf.r*2.6,()=>{ const r=ET.wdwarf.r, c=ET.wdwarf.c;
     pHaze(r*2.4,"#cfe0ff",.55);
-    for(const [R,w,rot,al] of[[r*2.6,.22,0,1],[r*1.6,.2,Math.PI/4,.55]]){ starP(0,0,R,r*w,4,rot);
-      const g=C.createRadialGradient(0,0,0,0,0,R); g.addColorStop(0,`rgba(255,255,255,${al})`); g.addColorStop(.4,`rgba(200,220,255,${al*.6})`); g.addColorStop(1,"rgba(200,220,255,0)"); C.fillStyle=g; C.fill(); }
+    pSpikes(r*2.6,4,"#cfe0ff",0,.05); pSpikes(r*1.5,4,"#cfe0ff",Math.PI/4,.04);
     ringL(0,0,r*1.45,"rgba(220,230,255,.35)",1); pSphere(r,c,17,4); pHaze(r*.6,"#ffffff",1); }),
   wolf:(i)=>sprite("wo"+i,ET.wolf.r*2.2,()=>{ const r=ET.wolf.r, c=ET.wolf.c, t=i/NF;
     for(let k=0;k<3;k++){ const f=(t+k/3)%1; ringL(0,0,r*(1.05+f*1.1),hexA(c[1],.5*(1-f)),.6+2*(1-f)); } // stellar-wind shells
     for(let j=0;j<16;j++){ const a=j*TAU/16+hsh(4,j)*.3, f=(t+hsh(5,j))%1, r0=r*(1.05+f*.9); seg(Math.cos(a)*r0,Math.sin(a)*r0,Math.cos(a)*(r0+r*.3),Math.sin(a)*(r0+r*.3),hexA(c[0],.7*(1-f)),1.4); }
-    pCorona(r,10,c[1],.3,t,41); pSphere(r,c,41,20); }),
+    pCorona(r,10,c[1],.3,t,41); pTendrils(r,41,5,t,.7); pSphere(r,c,41,20); }),
   mag:()=>sprite("mg",ET.magnetar.r*2,()=>{ const r=ET.magnetar.r, c=ET.magnetar.c;
     pHaze(r*1.9,c[1],.4);
     for(let j=0;j<4;j++){ C.save(); C.rotate(j*Math.PI/4); for(const sd of[-1,1]){ C.strokeStyle=hexA(c[1],.55); C.lineWidth=1.3; C.beginPath(); C.ellipse(0,sd*r*.75,r*.5,r*.75,0,0,TAU); C.stroke(); } C.restore(); } // twisted field
@@ -1324,8 +1426,8 @@ const SP={
   ring:(i)=>sprite("rn"+i,ET.ringer.r*2.4,()=>{ const r=ET.ringer.r, c=ET.ringer.c, t=i/NF;
     pHaze(r*2.2,c[1],.35);
     for(let k=0;k<2;k++){ const f=(t+k*.5)%1; C.save(); C.scale(1,.85); ringL(0,0,r*(1.1+f*1.2),hexA(c[1],.7*(1-f)),.6+2.4*(1-f)); C.restore(); } // ejected shells
-    starP(0,0,r*1.7,r*.25,8,t*TAU/8); C.fillStyle=hexA(c[0],.35); C.fill();
-    pCorona(r*.8,8,c[1],.35,t,29); pSphere(r*.8,c,29,10); }),
+    pSpikes(r*1.9,8,c[0],t*TAU/8,.04);
+    pCorona(r*.8,8,c[1],.35,t,29); pTendrils(r*.8,29,5,t,.8); pSphere(r*.8,c,29,10); }),
   quasar:()=>sprite("qs",ET.quasar.r*2.2,()=>{ const r=ET.quasar.r, c=ET.quasar.c;
     pHaze(r*2.1,c[1],.35);
     C.save(); C.scale(1,.38);
@@ -1655,9 +1757,10 @@ function playIntro(then){
   const st=[]; for(let i=0;i<280;i++) st.push({x:Math.random(),y:Math.random(),r:Math.random()*1.5+.3,tw:Math.random()*TAU,out:Math.random()});
   const foes=["slime","spiky","tank","bat","splitter","shooter","dasher","wolf","ringer","magnetar","slime","bat","shade","wdwarf"].map((t,i,a)=>({a:i*TAU/a.length+rand(-.12,.12),d:1+rand(0,.45),s:rand(.8,1.15),
     e:{t,id:i,x:0,y:0,vx:1,vy:0,r:ET[t].r,seed:i*53,ph:0,rot:0,flash:0,elite:false,portrait:true,cd:2,st:0,tm:0,dirx:1,diry:0,phase:1,slam:0,slT:0,hp:1,max:1,age:0,ja:0}}));
-  intro={t:0,st,foes,then,ign:false,ttl:false}; $("introSkip").style.display="block";
+  const neb=[]; for(let i=0;i<7;i++) neb.push({x:Math.random(),y:Math.random(),r:.22+Math.random()*.3,c:["110,50,200","40,90,210","190,60,140","50,140,200"][i%4]});
+  intro={t:0,st,foes,neb,then,ign:false,ttl:false}; $("introSkip").style.display="block"; introScore();
 }
-function endIntro(){ if(!intro) return; const f=intro.then; intro=null; $("introSkip").style.display="none"; save.introSeen=1; persist(); if(f) f(); }
+function endIntro(){ if(!intro) return; stopIntroScore(); const f=intro.then; intro=null; $("introSkip").style.display="none"; save.introSeen=1; persist(); if(f) f(); }
 $("introSkip").onclick=e=>{ e.stopPropagation(); endIntro(); };
 $("toIntro").onclick=()=>playIntro(()=>{ state="menu"; refreshMenu(); $("menu").classList.add("show"); });
 function wrapText(t,maxW){ const out=[]; let line=""; for(const w of t.split(" ")){ const tryL=line?line+" "+w:w; if(C.measureText(tryL).width>maxW&&line){ out.push(line); line=w; } else line=tryL; } if(line) out.push(line); return out; }
@@ -1670,8 +1773,13 @@ function drawIntro(dt){
   C=ctx; ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalAlpha=1;
   const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*.7); bg.addColorStop(0,"#0d0a26"); bg.addColorStop(1,"#030209");
   ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  const z=1+T*.012, ZT=()=>ctx.setTransform(DPR*z,0,0,DPR*z,DPR*cx*(1-z),DPR*cy*(1-z)); ZT(); // a slow push in, like a camera on a dolly
   // the Veil sweeps across and snuffs the stars it passes
   const veil=clamp((T-t1)/INTRO[1].d,0,1), vx=-W*.25+veil*W*1.6, sp=clamp((T-t3)/1.4,0,1);
+  ctx.globalCompositeOperation="lighter"; // nebulae: they dim as the Veil passes, and glow again once the spark is lit
+  for(const n of I.neb){ const x=n.x*W, y=n.y*H, R=n.r*Math.max(W,H), dim=x<vx?.25:1, a=(.16*dim+.12*sp)*(.85+.15*Math.sin(clock*.5+n.x*9));
+    const g=ctx.createRadialGradient(x,y,0,x,y,R); g.addColorStop(0,`rgba(${n.c},${a})`); g.addColorStop(1,`rgba(${n.c},0)`); ctx.fillStyle=g; ctx.fillRect(x-R,y-R,R*2,R*2); }
+  ctx.globalCompositeOperation="source-over";
   for(const s of I.st){ const x=s.x*W, y=s.y*H; let a=.3+.5*(.5+.5*Math.sin(clock*2.2+s.tw));
     if(x<vx-s.out*W*.22) a*=.05+.95*sp*clamp(1-Math.hypot(x-cx,y-cy)/(M*(.15+.6*sp)),0,1); // dark, until the spark relights the ones nearby
     ctx.globalAlpha=a; ctx.fillStyle=s.r>1.4?"#ffe9c4":"#dfe8ff"; ctx.beginPath(); ctx.arc(x,y,s.r,0,TAU); ctx.fill(); }
@@ -1686,8 +1794,8 @@ function drawIntro(dt){
       e.ph=clock*6; e.rot=clock*.6; e.vx=-Math.cos(f.a); e.vy=-Math.sin(f.a); e.cd=2.3-((clock*.9+e.id*.3)%2.3); e.age+=dt;
       ctx.globalAlpha=fin; glow(x,y,M*.09*f.s,"rgba(255,60,90,.5)",.5);
       const s=f.s*M/560; P.x=-Math.cos(f.a)*1e3; P.y=-Math.sin(f.a)*1e3; // lit from the centre
-      ctx.save(); ctx.globalAlpha=fin; ctx.setTransform(DPR*s,0,0,DPR*s,DPR*x,DPR*y); drawEnemy(e); ctx.restore(); }
-    P.x=px; P.y=py; ctx.globalAlpha=1; C=ctx; ctx.setTransform(DPR,0,0,DPR,0,0); }
+      ctx.save(); ctx.globalAlpha=fin; ctx.setTransform(DPR*s*z,0,0,DPR*s*z,DPR*(cx+(x-cx)*z),DPR*(cy+(y-cy)*z)); drawEnemy(e); ctx.restore(); }
+    P.x=px; P.y=py; ctx.globalAlpha=1; C=ctx; ZT(); }
   // the spark: you
   if(T>t3){ const p3=T-t3, g=1-Math.pow(1-clamp(p3/1.2,0,1),3), r=M*(.012+.03*g)*(1+.06*Math.sin(clock*11));
     if(!I.ign){ I.ign=true; sfx.nova(); }
@@ -1695,6 +1803,16 @@ function drawIntro(dt){
     for(let i=0;i<3;i++){ const q=(p3-i*.35); if(q>0&&q<2.2) ringL(cx,cy,q*M*.32,`rgba(255,225,170,${.7*(1-q/2.2)})`,3-i*.6); }
     ctx.fillStyle="#fffaf0"; ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.fill();
     for(let i=0;i<4;i++){ const a=clock*.8+i*TAU/4, L=r*(2.6+.5*Math.sin(clock*4+i)); ctx.strokeStyle=`rgba(255,240,210,${.55*g})`; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*r*.6,cy+Math.sin(a)*r*.6); ctx.lineTo(cx+Math.cos(a)*L,cy+Math.sin(a)*L); ctx.stroke(); } }
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(T>t3){ const p3=T-t3, g=clamp(p3/.15,0,1)*(.35+.65*Math.exp(-p3*1.4)); // ignition: a white flash and an anamorphic lens flare
+    ctx.globalCompositeOperation="lighter";
+    for(const [h,a,col] of[[M*.012,.9,"255,250,235"],[M*.05,.35,"140,190,255"]]){ const lg=ctx.createLinearGradient(0,0,W,0); lg.addColorStop(0,`rgba(${col},0)`); lg.addColorStop(.5,`rgba(${col},${a*g})`); lg.addColorStop(1,`rgba(${col},0)`);
+      ctx.fillStyle=lg; ctx.fillRect(0,cy-h/2,W,h); }
+    for(const [d,rr,col] of[[-.35,.03,"120,170,255"],[.22,.018,"255,180,120"],[.5,.045,"170,120,255"]]){ glow(cx+d*W*.6,cy+d*H*.25,M*rr*2,`rgba(${col},.6)`,.5*g); }
+    ctx.globalCompositeOperation="source-over";
+    const fl=Math.max(0,1-p3*2.5); if(fl>0){ ctx.fillStyle=`rgba(255,248,235,${fl*.75})`; ctx.fillRect(0,0,W,H); } }
+  { const vg=ctx.createRadialGradient(cx,cy,M*.3,cx,cy,Math.max(W,H)*.75); vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,.6)"); ctx.fillStyle=vg; ctx.fillRect(0,0,W,H); } // vignette
+  { const bh=H*.085*clamp(T/1.4,0,1); ctx.fillStyle="#000"; ctx.fillRect(0,0,W,bh); ctx.fillRect(0,H-bh,W,bh); } // letterbox
   // captions
   ctx.textAlign="center"; ctx.textBaseline="middle";
   if(sc.t){ const a=clamp(lt/.7,0,1)*clamp((sc.d-lt)/.6,0,1), fz=Math.round(clamp(M*.04,17,30));
@@ -1706,6 +1824,9 @@ function drawIntro(dt){
     ctx.globalAlpha=a; ctx.font=`700 ${fz}px 'Exo 2'`; try{ ctx.letterSpacing=Math.round(fz*.18)+"px"; }catch(e){}
     const tg=ctx.createLinearGradient(0,y-fz/2,0,y+fz/2); tg.addColorStop(0,"#fff6d8"); tg.addColorStop(1,"#ffb84a");
     glow(cx,y,fz*2.2,"rgba(255,190,110,.5)",.45*a); ctx.lineWidth=6; ctx.strokeStyle="rgba(20,6,40,.8)"; ctx.strokeText("STARVEIL",cx,y); ctx.fillStyle=tg; ctx.fillText("STARVEIL",cx,y);
+    { const tw=ctx.measureText("STARVEIL").width, sx=cx-tw+clamp(lt/1.8,0,1)*tw*2, sg=ctx.createLinearGradient(sx-fz,0,sx+fz,0); // a light sweep across the title
+      sg.addColorStop(0,"rgba(255,255,255,0)"); sg.addColorStop(.5,"rgba(255,255,255,.85)"); sg.addColorStop(1,"rgba(255,255,255,0)");
+      ctx.globalCompositeOperation="lighter"; ctx.fillStyle=sg; ctx.fillText("STARVEIL",cx,y); ctx.globalCompositeOperation="source-over"; }
     try{ ctx.letterSpacing="3px"; }catch(e){} ctx.font=`500 ${Math.round(fz*.2)}px 'Exo 2'`; ctx.fillStyle="#cfd6ff";
     ctx.fillText("Burn bright  ·  Shatter the swarm  ·  Never stand still",cx,y+fz*.85); try{ ctx.letterSpacing="0px"; }catch(e){} }
   ctx.globalAlpha=1; ctx.textAlign="left"; ctx.textBaseline="alphabetic";
