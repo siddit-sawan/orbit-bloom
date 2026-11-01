@@ -411,6 +411,8 @@ function recalc(){
 function powerOf(){ let s=0; for(const id in P.weapons) s+=P.weapons[id]; for(const id in P.passives) s+=P.passives[id]; for(const id in P.evo) s+=4; return s; }
 const threat=()=>1+Math.max(0,(P.pw||0)-2)*.045; // upgrades past the starting kit make the swarm tougher and denser
 const LF=()=>clamp(P.hp/P.maxHp,0,1);          // mass fraction: drives glow radius, reach, damage and spawn pressure
+// mass from kills falls off as your build grows and the run drags on, and stops entirely while you loiter
+const massGainM=()=>P.camp>0?0:1/(1+(P.pw||0)*.035+time/400);
 const lightTarget=()=>150+310*LF()+P.radB;
 const petalCfg=()=>{ const lv=P.weapons.petals, ev=P.evo.petals; return {n:lv+1+(ev?4:0),orbit:78+lv*5+(ev?28:0),br:12+lv+(ev?5:0),dmg:(9+3*lv)*(ev?1.8:1)}; };
 const flameR=()=>(64+13*P.weapons.flame)*(P.evo.flame?1.45:1);
@@ -512,7 +514,7 @@ function kill(e){
   decals.push({x:e.x,y:e.y,r:e.r*rand(.9,1.5),c:T.c[1],a:.32,rot:rand(0,TAU)}); if(decals.length>70) decals.shift();
   dropLoot(e);
   // mass only comes back from the swarm you shatter
-  const gain=boss?45:(1.2+T.xp)*(e.elite?3:1);
+  const gain=(boss?45:(1.2+T.xp)*(e.elite?3:1))*massGainM();
   P.hp=Math.min(P.maxHp,P.hp+gain);
   if(motes.length<120) for(let i=0,n=boss?18:1+(e.elite?3:0);i<n;i++) motes.push({x:e.x+rand(-8,8),y:e.y+rand(-8,8),vx:rand(-160,160),vy:rand(-160,160),l:0});
   if(e.t==="tank"&&state==="play") hz.push({x:e.x,y:e.y,r:e.r*3.4,t:1.1,m:1.1,d:e.dmg*.7,sn:1}); // red giants go supernova
@@ -583,7 +585,7 @@ function updateWeapons(dt){
   if(novas.length){
     for(const n of novas){ n.r+=560*dt;
       for(const e of enemies){ if(e.dead||n.hit.has(e)) continue; const d=Math.hypot(e.x-P.x,e.y-P.y);
-        if(d<=n.r+e.r&&d>=n.r-60-e.r){ n.hit.add(e); if(E.nova) P.hp=Math.min(P.maxHp,P.hp+.25); hit(e,n.dmg,(e.x-P.x)/(d||1),(e.y-P.y)/(d||1),420); } } }
+        if(d<=n.r+e.r&&d>=n.r-60-e.r){ n.hit.add(e); if(E.nova) P.hp=Math.min(P.maxHp,P.hp+.25*massGainM()); hit(e,n.dmg,(e.x-P.x)/(d||1),(e.y-P.y)/(d||1),420); } } }
     novas=novas.filter(n=>n.r<n.max);
   }
   if(w.flame){
@@ -661,9 +663,10 @@ function update(dt){
   const pm=Math.hypot(P.x,P.y); if(pm>ARENA-P.r){P.x*=(ARENA-P.r)/pm;P.y*=(ARENA-P.r)/pm;}
   P.inv=Math.max(0,P.inv-dt); P.hurt=Math.max(0,P.hurt-dt);
   // loitering: stay inside a small patch of sky for more than 3s and the Veil starts collapsing on you
-  if(tut){ P.still=0; P.ax=P.x; P.ay=P.y; } else if(Math.hypot(P.x-P.ax,P.y-P.ay)>170){ P.ax=P.x; P.ay=P.y; P.still=0; } else P.still+=dt;
+  P.sx=(P.sx||0)+P.vx*dt; P.sy=(P.sy||0)+P.vy*dt; // only your own movement counts: being dragged by a magnetar doesn't
+  if(tut){ P.still=0; P.ax=P.sx; P.ay=P.sy; } else if(Math.hypot(P.sx-P.ax,P.sy-P.ay)>170){ P.ax=P.sx; P.ay=P.sy; P.still=0; } else P.still+=dt;
   P.camp=Math.max(0,P.still-3);
-  P.hp=Math.min(P.maxHp,P.hp+(P.regen-(1+Math.min(time/120,3.5))*P.drainM*(1+Math.min(P.camp*.6,4)))*dt);
+  P.hp=Math.min(P.maxHp,P.hp+((P.camp>0?0:P.regen)-(1+Math.min(time/120,3.5))*P.drainM*(1+Math.min(P.camp*.6,4)))*dt);
   if(tut) P.hp=Math.max(P.hp,P.maxHp*(tut.i===3?.35:.8)); // the tutorial can't kill you, and keeps your glow (and weapons) strong outside the mass lesson
   if(P.hp<=0){ die(); return; }
   P.rng=.6+.7*LF(); lightR+=(lightTarget()-lightR)*Math.min(1,dt*3);
