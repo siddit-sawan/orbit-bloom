@@ -521,7 +521,7 @@ function kill(e){
 /* ================================================================ player hurt / xp */
 function hurtPlayer(d,sx,sy){
   if(P.inv>0||state!=="play") return;
-  d*=(1-P.armor); P.hp-=d; if(tut) P.hp=Math.max(P.hp,P.maxHp*.35); P.inv=.55; P.hurt=.4; shake=Math.max(shake,11); sfx.hurt();
+  d*=(1-P.armor); P.hp-=d; if(tut) P.hp=Math.max(P.hp,P.maxHp*(tut.i===3?.35:.8)); P.inv=.55; P.hurt=.4; shake=Math.max(shake,11); sfx.hurt();
   burst(P.x,P.y,12,"#ffe2a0",260,.5); addText(P.x,P.y-30,"-"+Math.round(d),false,"#ffb36a");
   const k=Math.atan2(P.y-sy,P.x-sx); P.vx+=Math.cos(k)*380; P.vy+=Math.sin(k)*380;
   if(P.hp<=0) die();
@@ -654,7 +654,7 @@ function update(dt){
   const pm=Math.hypot(P.x,P.y); if(pm>ARENA-P.r){P.x*=(ARENA-P.r)/pm;P.y*=(ARENA-P.r)/pm;}
   P.inv=Math.max(0,P.inv-dt); P.hurt=Math.max(0,P.hurt-dt);
   P.hp=Math.min(P.maxHp,P.hp+(P.regen-(1+Math.min(time/120,3.5))*P.drainM)*dt);
-  if(tut) P.hp=Math.max(P.hp,P.maxHp*.35); // the tutorial can't kill you
+  if(tut) P.hp=Math.max(P.hp,P.maxHp*(tut.i===3?.35:.8)); // the tutorial can't kill you, and keeps your glow (and weapons) strong outside the mass lesson
   if(P.hp<=0){ die(); return; }
   P.rng=.6+.7*LF(); lightR+=(lightTarget()-lightR)*Math.min(1,dt*3);
   cam.x+=(P.x-cam.x)*Math.min(1,dt*7); cam.y+=(P.y-cam.y)*Math.min(1,dt*7);
@@ -853,14 +853,15 @@ $("reroll").onclick=()=>{ if(rerolls>0&&state==="levelup"){ rerolls--; showCards
 const TUT=[
   {t:"Move your star with <b>WASD</b> or the <b>arrow keys</b>. You can also hold the mouse, or drag on a touch screen.", done:s=>s.moved>500},
   {t:"<b>Dash</b> with SPACE, SHIFT, right-click or the DASH button. You can't be hurt mid-dash. Dash twice.", done:s=>s.dashes>=2},
-  {t:"Your weapons fire on their own. Get close to the red dwarfs and <b>shatter 10 stars</b>.", go:()=>{ for(let i=0;i<10;i++) spawn("slime",i*TAU/10); }, done:s=>kills>=10},
+  {t:"Your weapons fire on their own. Get close to the red dwarfs and <b>shatter 10 stars</b>.", go:()=>{ tut.k0=kills; for(let i=0;i<10;i++) tutFoe("slime",i*TAU/10); }, done:s=>kills-s.k0>=10},
   {t:"Your <b>MASS</b> (top bar) burns away every second. The golden motes that shattered stars leave behind fly into you and refuel it.", done:s=>s.tt>6},
   {t:"<b>Solar flare!</b> When an orange circle appears, get out before it erupts. Dodge two.", go:()=>{ tut.fl=0; }, done:s=>s.flares>=2&&!hz.length},
   {t:"Red giants <b>go supernova</b> when they die. Kill this one, then get clear of the blast ring.", go:()=>{ const a=rand(0,TAU); spawnAt("tank",P.x+Math.cos(a)*300,P.y+Math.sin(a)*300); }, done:s=>s.sn&&!hz.length},
-  {t:"Grab the glowing <b>NOVA</b> pickup. It blasts every star on screen.", go:()=>{ const a=rand(0,TAU); pickups.push({k:"bomb",x:P.x+Math.cos(a)*240,y:P.y+Math.sin(a)*240,t:0}); for(let i=0;i<12;i++) spawn(pick1(["slime","bat","spiky"]),i*TAU/12); }, done:s=>s.bombs>=1},
+  {t:"Grab the glowing <b>NOVA</b> pickup. It blasts every star on screen.", go:()=>{ const a=rand(0,TAU); pickups.push({k:"bomb",x:P.x+Math.cos(a)*240,y:P.y+Math.sin(a)*240,t:0}); for(let i=0;i<12;i++) tutFoe(pick1(["slime","bat","spiky"]),i*TAU/12); }, done:s=>s.bombs>=1},
   {t:"That's the basics. Level-ups let you pick new powers, and the <b>Star Atlas</b> on the menu explains every enemy. Now survive!", done:s=>s.tt>5}
 ];
 let tut=null, wantTut=false, tutVis=false;
+function tutFoe(t,a=rand(0,TAU)){ const d=rand(300,380); return spawnAt(t,P.x+Math.cos(a)*d,P.y+Math.sin(a)*d); } // spawn just inside the glow, so you can watch your weapons work
 function tutStart(){ tut={i:-1,tt:0,moved:0,dashes:0,flares:0,bombs:0,sn:false,ok:0,fl:0,sp:2}; tutNext(); }
 function tutNext(){
   tut.i++; tut.tt=0; tut.ok=0;
@@ -878,7 +879,7 @@ function tutUpdate(dt){
   const st=TUT[tut.i]; tut.tt+=dt; tut.moved+=Math.hypot(P.vx,P.vy)*dt;
   if(tut.i===4){ tut.fl-=dt; if(tut.fl<=0&&tut.flares<2){ tut.fl=2.6; hz.push({x:P.x+P.vx*.3,y:P.y+P.vy*.3,r:110,t:1.6,m:1.6,d:5}); } }
   if(tut.i===5&&hz.some(h=>h.sn)) tut.sn=true;
-  if(tut.i>=2&&tut.i!==5){ tut.sp-=dt; if(tut.sp<=0&&enemies.length<12){ tut.sp=1.4; spawn("slime"); } } // a gentle trickle to practise on
+  if(tut.i>=2&&tut.i!==5){ tut.sp-=dt; if(tut.sp<=0&&enemies.length<12){ tut.sp=1.4; tutFoe("slime"); } } // a gentle trickle to practise on
   if(!tut.ok&&st.done(tut)){ tut.ok=.9; $("tut").classList.add("ok"); $("tutProg").style.width=((tut.i+1)/TUT.length*100)+"%"; sfx.heal(); }
   if(tut.ok){ tut.ok-=dt; if(tut.ok<=0) tutNext(); }
 }
