@@ -1,4 +1,4 @@
-# Orbit Nova
+# Starveil
 
 A celestial arena survivor for the browser, built for CrazyGames (SDK v3 integrated). Everything is drawn from basic shapes on a 2D canvas, set in Exo 2, with no 3D and no external art.
 
