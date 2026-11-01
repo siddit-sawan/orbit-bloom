@@ -182,6 +182,9 @@
 "use strict";
 
 /* ================================================================ CrazyGames SDK wrapper */
+// ad pacing: no midgame ad before the first run or the tutorial, and at most one ad every 3 minutes
+let lastAdAt=performance.now(), runsThisSession=0;
+const midgameDue=()=>runsThisSession>0&&performance.now()-lastAdAt>=180000;
 const CG = {
   ready:false, muted:false, gp:false,
   get sdk(){ return window.CrazyGames && window.CrazyGames.SDK; },
@@ -199,13 +202,14 @@ const CG = {
   start(){ if(this.gp) return; this.gp=true; try{ this.ready && this.sdk.game.gameplayStart(); }catch(e){} },
   stop(){ if(!this.gp) return; this.gp=false; try{ this.ready && this.sdk.game.gameplayStop(); }catch(e){} },
   happy(){ try{ this.ready && this.sdk.game.happytime(); }catch(e){} },
-  ad(type){ // true when finished (or no SDK in local dev); false on error/no-fill
+  ad(type){ if(type==="midgame"&&!midgameDue()) return Promise.resolve(true); // midgame ads are rationed; rewarded ones are always player-chosen
+    // true when finished (or no SDK in local dev); false on error/no-fill
     return new Promise(res => {
       if(!this.ready) return res(true);
       try{
         this.sdk.ad.requestAd(type, {
           adStarted: () => { adPlaying = true; applyMute(); },
-          adFinished: () => { adPlaying = false; applyMute(); res(true); },
+          adFinished: () => { adPlaying = false; lastAdAt = performance.now(); applyMute(); res(true); },
           adError: () => { adPlaying = false; applyMute(); res(false); }
         });
       }catch(e){ adPlaying = false; res(false); }
@@ -966,7 +970,7 @@ function hideAll(){ for(const id of["menu","select","atlas","levelup","pause","o
 function setHud(on){ $("hudbtns").style.display=on?"flex":"none"; $("dashBtn").style.display=on?"block":"none"; }
 async function startRun(){
   audio(); hideAll(); reset(); tut=null; if(wantTut||!save.tutDone) tutStart(); wantTut=false; state="paused-ad"; setHud(false);
-  await CG.ad("midgame");
+  if(!tut) await CG.ad("midgame"); runsThisSession++;
   state="play"; CG.start(); setHud(true);
   if(!musicOn){ musicOn=true; musicLoop(); }
 }
