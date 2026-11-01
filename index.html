@@ -434,7 +434,7 @@ function reset(){
 
 /* ================================================================ spawning */
 function spawnAt(type,x,y,o={}){
-  const T=ET[type], th=threat(), boss=type.startsWith("boss"), sc=(1+time/65+(time/300)**2)*(boss?1+(th-1)*.6:th*(1+Math.min(time/240,.8)));
+  const T=ET[type], th=threat(), boss=type.startsWith("boss"), sc=(1+time/65+(time/300)**2)*(boss?1+(th-1)*.6:th*(1+Math.min(time/200,1.2)));
   const e={id:nextId++,t:type,x,y,vx:o.vx||0,vy:o.vy||0,r:T.r,hp:T.hp*sc*(boss?1+bosses*.5:1),max:0,sp:T.sp*(1+Math.min(time/360,.6))*(1+Math.min((th-1)*.12,.2)),dmg:T.dmg*(1+Math.min(time/400,1.2)),
     xp:T.xp,flash:0,ph:rand(0,TAU),hcd:0,rot:rand(0,TAU),seed:rand(0,1000),age:0,cd:rand(1,2.2),st:0,tm:0,sh:type==="boss"?3.5:0,sum:6,phase:1,vol:3,sp3:0,dc:4,dirx:0,diry:0,elite:false,dead:false,slam:0,slT:0};
   if(!boss&&type!=="mini"&&time>60&&Math.random()<.05+Math.min(time/4000,.1)+Math.min((P.pw||0)*.002,.08)){e.elite=true;e.hp*=3;e.r*=1.25;e.xp*=3;e.dmg*=1.3;}
@@ -514,7 +514,7 @@ function kill(e){
   decals.push({x:e.x,y:e.y,r:e.r*rand(.9,1.5),c:T.c[1],a:.32,rot:rand(0,TAU)}); if(decals.length>70) decals.shift();
   dropLoot(e);
   // mass only comes back from the swarm you shatter
-  const gain=(boss?45:(1.2+T.xp)*(e.elite?3:1))*massGainM();
+  const gain=(boss?45:(1.6+T.xp*1.3)*(e.elite?3:1))*massGainM();
   P.hp=Math.min(P.maxHp,P.hp+gain);
   if(motes.length<120) for(let i=0,n=boss?18:1+(e.elite?3:0);i<n;i++) motes.push({x:e.x+rand(-8,8),y:e.y+rand(-8,8),vx:rand(-160,160),vy:rand(-160,160),l:0});
   if(e.t==="tank"&&state==="play") hz.push({x:e.x,y:e.y,r:e.r*3.4,t:1.1,m:1.1,d:e.dmg*.7,sn:1}); // red giants go supernova
@@ -677,13 +677,13 @@ function update(dt){
   // spawning
   spawnT-=dt;
   if(spawnT<=0&&!tut){
-    spawnT=Math.max(.14,.75-time/160)/(.75+.6*LF())/(1+(threat()-1)*.4); // a brighter glow draws more of the dark
-    const n=1+Math.floor(time/55)+Math.floor((P.pw||0)/14);
-    for(let i=0;i<n&&enemies.length<210;i++) spawn(pickType());
+    spawnT=Math.max(.26,.9-time/200)/(.75+.6*LF())/(1+(threat()-1)*.4); // a brighter glow draws more of the dark
+    const n=1+Math.floor(time/90)+Math.floor((P.pw||0)/20);
+    for(let i=0;i<n&&enemies.length<110;i++) spawn(pickType());
   }
   if(!tut&&bossIdx<BOSS_AT.length&&time>=BOSS_AT[bossIdx]){ spawn(BOSS_T[bossIdx],rand(0,TAU)); rings.push({x:P.x,y:P.y,r:10,m:900,l:1,c:"255,210,90"}); sfx.boss(); shake=14; banner={txt:BOSS_N[bossIdx].toUpperCase(),sub:"emerges from the void",t:2.8}; bossIdx++; }
   if(!tut) swarmT-=dt;
-  if(swarmT<=0){ swarmT=50; const t=pick1(time>100?["slime","bat","spiky","mini","wdwarf"]:["slime","bat","spiky","mini"]), n=16+Math.min(12,Math.floor(time/40)+Math.floor((P.pw||0)/8));
+  if(swarmT<=0){ swarmT=50; const t=pick1(time>100?["slime","bat","spiky","mini","wdwarf"]:["slime","bat","spiky","mini"]), n=10+Math.min(8,Math.floor(time/60)+Math.floor((P.pw||0)/12));
     for(let i=0;i<n;i++) spawn(t,i*TAU/n); banner={txt:"SWARM!",sub:"Break the circle",t:2.2}; sfx.boss(); }
 
   // enemies
@@ -701,7 +701,7 @@ function update(dt){
     else if(e.t==="wdwarf"){ const s=Math.sin(e.age*4+e.seed)*.7; tx+=-dy/d*s; ty+=dx/d*s; } // dense and quick, jinking side to side
     else if(e.t==="wolf"){ e.cd-=dt; if(e.cd<=0&&d<620){ e.cd=3.2; const o=rand(0,TAU); for(let i=0;i<10;i++) shootAt(e,175,e.dmg*.6,o+i*TAU/10); } }
     else if(e.t==="magnetar"){ if(d<300) sp*=.3; if(d<460&&P.dashT<=0){ const f=110*(1-d/460); P.x-=dx/d*f*dt; P.y-=dy/d*f*dt; } } // drags you toward it; dashing breaks free
-    else if(e.t==="nursery"){ e.sum-=dt; if(e.sum<=0){ e.sum=5; if(enemies.length<200) for(let i=0;i<3;i++){ const a=rand(0,TAU); spawnAt("mini",e.x+Math.cos(a)*(e.r+16),e.y+Math.sin(a)*(e.r+16),{vx:Math.cos(a)*200,vy:Math.sin(a)*200}); } } }
+    else if(e.t==="nursery"){ e.sum-=dt; if(e.sum<=0){ e.sum=5; if(enemies.length<100) for(let i=0;i<3;i++){ const a=rand(0,TAU); spawnAt("mini",e.x+Math.cos(a)*(e.r+16),e.y+Math.sin(a)*(e.r+16),{vx:Math.cos(a)*200,vy:Math.sin(a)*200}); } } }
     else if(e.t==="ringer"){ if(d<280) sp*=.15; e.cd-=dt; if(e.cd<=0&&d<520){ e.cd=3.4; shocks.push({x:e.x,y:e.y,r:e.r,max:360,d:e.dmg,hit:false}); sfx.nova(); } }
     else if(e.t==="quasar"){ // keeps its distance, then sweeps twin jets across you: 0 idle, 1 warning, 2 firing
       if(d<300){tx=-tx;ty=-ty;} else if(d<440){const px=-ty,py=tx;tx=px;ty=py;sp*=.5;}
@@ -1503,7 +1503,7 @@ function drawPickup(g){
 function drawHUD(){
   C.lineCap="round";
   if(state==="play"&&P.camp>0){ const a=.6+.4*Math.sin(clock*9); C.save(); C.textAlign="center"; C.font=`700 ${Math.round(Math.min(26,W*.045))}px 'Exo 2'`;
-    C.lineWidth=5; C.strokeStyle="rgba(30,0,20,.85)"; C.fillStyle=`rgba(255,110,90,${a})`; const y=H*.24;
+    C.lineWidth=5; C.strokeStyle="rgba(30,0,20,.85)"; C.fillStyle=`rgba(255,110,90,${a})`; const y=H*.74;
     C.strokeText("THE VEIL IS CLOSING IN — MOVE!",W/2,y); C.fillText("THE VEIL IS CLOSING IN — MOVE!",W/2,y); C.restore(); }
   for(const g of pickups){ if(g.k!=="bomb") continue; // off-screen nova pickups get an arrow on the screen edge
     const sx=(g.x-cam.x)*Z+W/2, sy=(g.y-cam.y)*Z+H/2; if(sx>0&&sx<W&&sy>0&&sy<H) continue;
